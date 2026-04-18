@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse, JSONResponse
 
 from state import portfolio_data
 from config import settings
-from models import SectorAllocation
+from models import PortfolioSummary, SectorAllocation
 
 logger = logging.getLogger(__name__)
 
@@ -291,13 +291,102 @@ def _is_ws_connected() -> bool:
         return False
 
 
+@router.get("/api/portfolio/csv-positions")
+async def get_csv_positions():
+    """List positions stored in the local portfolio CSV."""
+    from fetchers.csv_reader import load_saved_csv_positions, resolve_csv_path
+
+    path = resolve_csv_path()
+    return {
+        "exists": path.exists(),
+        "csv_path": str(path),
+        "positions": load_saved_csv_positions() if path.exists() else [],
+    }
+
+
+@router.post("/api/portfolio/csv-positions")
+async def create_csv_position(data: dict):
+    """Add or replace a single position in the local portfolio CSV."""
+    from fetchers.csv_reader import resolve_csv_path, upsert_csv_position
+    from services.portfolio_builder import update_saved_csv_portfolio
+
+    position = data.get("position", data)
+    try:
+        positions, saved_position, replaced = upsert_csv_position(position)
+    except ValueError as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+
+    result = await update_saved_csv_portfolio()
+    return {
+        "status": "ok",
+        "action": "updated" if replaced else "created",
+        "position": saved_position,
+        "positions": len(positions),
+        "csv_path": str(resolve_csv_path()),
+        "portfolio": result,
+    }
+
+
+@router.put("/api/portfolio/csv-positions/{ticker}")
+async def update_csv_position(ticker: str, data: dict):
+    """Update a single position in the local portfolio CSV."""
+    from fetchers.csv_reader import resolve_csv_path, upsert_csv_position
+    from services.portfolio_builder import update_saved_csv_portfolio
+
+    position = data.get("position", data)
+    try:
+        positions, saved_position, replaced = upsert_csv_position(
+            position,
+            original_ticker=ticker,
+        )
+    except ValueError as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+
+    result = await update_saved_csv_portfolio()
+    return {
+        "status": "ok",
+        "action": "updated" if replaced else "created",
+        "position": saved_position,
+        "positions": len(positions),
+        "csv_path": str(resolve_csv_path()),
+        "portfolio": result,
+    }
+
+
+@router.delete("/api/portfolio/csv-positions/{ticker}")
+async def delete_csv_position_route(ticker: str):
+    """Delete a single position from the local portfolio CSV."""
+    from fetchers.csv_reader import delete_csv_position, resolve_csv_path
+    from services.portfolio_builder import update_saved_csv_portfolio
+
+    positions, deleted = delete_csv_position(ticker)
+    if not deleted:
+        return JSONResponse({"error": f"Position {ticker} not found"}, status_code=404)
+
+    portfolio_result = {"status": "empty"}
+    if positions:
+        portfolio_result = await update_saved_csv_portfolio()
+    else:
+        portfolio_data["summary"] = PortfolioSummary(display_currency="USD")
+        portfolio_data["source"] = "csv"
+        portfolio_data["last_refresh"] = datetime.now()
+
+    return {
+        "status": "ok",
+        "action": "deleted",
+        "positions": len(positions),
+        "csv_path": str(resolve_csv_path()),
+        "portfolio": portfolio_result,
+    }
+
+
 @router.post("/api/portfolio/upload-csv")
 async def upload_csv_portfolio(data: dict):
     """Import portfolio from CSV data uploaded by the frontend.
 
     Expects JSON body: {"positions": [{"ticker": "AAPL", "shares": 10, "buy_price": 150, ...}, ...]}
     """
-    from fetchers.csv_reader import parse_csv_json, csv_positions_to_portfolio_format
+    from fetchers.csv_reader import parse_csv_json, csv_positions_to_portfolio_format, save_csv_positions
     from services.portfolio_builder import build_portfolio_from_csv
 
     positions_raw = data.get("positions", [])
@@ -308,6 +397,8 @@ async def upload_csv_portfolio(data: dict):
     positions = parse_csv_json(positions_raw)
     if not positions:
         return JSONResponse({"error": "No valid positions found in CSV"}, status_code=400)
+
+    saved_path = save_csv_positions(positions)
 
     # Fetch live prices + daily changes from yFinance
     tickers = [
@@ -329,7 +420,12 @@ async def upload_csv_portfolio(data: dict):
     # Build portfolio summary (same pipeline as Parqet)
     try:
         result = await build_portfolio_from_csv(portfolio_positions, daily_changes)
-        return {"status": "ok", "positions_imported": len(portfolio_positions), **result}
+        return {
+            "status": "ok",
+            "positions_imported": len(portfolio_positions),
+            "saved_to": str(saved_path),
+            **result,
+        }
     except Exception as e:
         logger.error(f"CSV import failed: {e}")
         return JSONResponse({"error": f"Import failed: {str(e)}"}, status_code=500)

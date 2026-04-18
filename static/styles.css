@@ -2201,6 +2201,127 @@ body {
     font-size: 0.82rem;
 }
 
+.holdings-manager-modal {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 2rem;
+    z-index: 1001;
+    width: min(920px, 94vw);
+    max-height: 90vh;
+    overflow-y: auto;
+    box-shadow: var(--shadow-lg);
+}
+
+.holding-form {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.85rem;
+    margin: 1.25rem 0;
+}
+
+.holding-form label {
+    display: grid;
+    gap: 0.35rem;
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+}
+
+.holding-form input,
+.holding-form select {
+    min-height: 42px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    padding: 0.65rem 0.75rem;
+    font: inherit;
+}
+
+.holding-form-actions {
+    grid-column: 1 / -1;
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.75rem;
+    align-items: center;
+}
+
+.secondary-action-btn {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    padding: 0.75rem 1rem;
+    cursor: pointer;
+}
+
+.holdings-manager-table-wrap {
+    max-height: 280px;
+    overflow: auto;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+}
+
+.holdings-manager-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.82rem;
+}
+
+.holdings-manager-table th,
+.holdings-manager-table td {
+    padding: 0.7rem 0.75rem;
+    border-bottom: 1px solid var(--border);
+    text-align: left;
+    white-space: nowrap;
+}
+
+.holdings-manager-table th {
+    position: sticky;
+    top: 0;
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+    z-index: 1;
+}
+
+.holding-row-actions {
+    display: flex;
+    gap: 0.4rem;
+    justify-content: flex-end;
+}
+
+.holding-icon-btn {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    padding: 0.4rem 0.55rem;
+    cursor: pointer;
+}
+
+.holding-icon-btn.danger {
+    color: var(--red);
+}
+
+@media (max-width: 720px) {
+    .holding-form {
+        grid-template-columns: 1fr;
+    }
+
+    .holding-form-actions {
+        justify-content: stretch;
+        flex-direction: column;
+    }
+
+    .holding-form-actions button {
+        width: 100%;
+    }
+}
+
 /* FMP usage indicator */
 .fmp-usage {
     font-size: 0.7rem;
@@ -2547,6 +2668,179 @@ body {
     font-size: 0.85rem;
     color: var(--text-secondary);
     line-height: 1.6;
+}
+
+/* ==================== AI Holding Recommendations ==================== */
+.holdings-ai-card {
+    overflow: hidden;
+}
+
+.holdings-ai-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 1rem;
+    margin-bottom: 1.25rem;
+}
+
+.holdings-ai-refresh {
+    width: auto;
+    min-width: 150px;
+    margin-top: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.45rem;
+}
+
+.holding-rec-summary {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 1.2rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    background: linear-gradient(135deg, rgba(0, 113, 227, 0.08), rgba(255, 255, 255, 0.72));
+    margin-bottom: 1rem;
+}
+
+.holding-rec-summary h3 {
+    margin: 0.15rem 0 0.35rem;
+    font-size: 1.15rem;
+}
+
+.holding-rec-summary p {
+    margin: 0;
+    color: var(--text-secondary);
+}
+
+.holding-rec-score {
+    min-width: 104px;
+    height: 104px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.78);
+    border: 1px solid rgba(0, 113, 227, 0.12);
+    box-shadow: var(--shadow-sm);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    color: var(--accent-blue);
+}
+
+.holding-rec-score strong {
+    font-size: 2rem;
+    line-height: 1;
+}
+
+.holding-rec-score span {
+    color: var(--text-muted);
+    font-size: 0.8rem;
+}
+
+.holding-rec-note,
+.holding-rec-next {
+    margin: 0.75rem 0;
+    color: var(--text-muted);
+    font-size: 0.82rem;
+}
+
+.holding-rec-insights {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+    margin-bottom: 1rem;
+}
+
+.holding-rec-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1rem;
+}
+
+.holding-rec-card {
+    padding: 1rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    background: var(--bg-card);
+    box-shadow: var(--shadow-sm);
+}
+
+.holding-rec-topline {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    align-items: flex-start;
+    margin-bottom: 0.85rem;
+}
+
+.holding-rec-topline strong {
+    display: block;
+    font-size: 1rem;
+}
+
+.holding-rec-topline span:not(.advisor-rec-badge) {
+    display: block;
+    color: var(--text-muted);
+    font-size: 0.78rem;
+}
+
+.holding-rec-metrics {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.45rem;
+    margin-bottom: 0.85rem;
+}
+
+.holding-rec-metrics span {
+    padding: 0.45rem 0.55rem;
+    border-radius: var(--radius-sm);
+    background: var(--bg-secondary);
+    color: var(--text-muted);
+    font-size: 0.75rem;
+}
+
+.holding-rec-metrics strong {
+    color: var(--text-primary);
+}
+
+.holding-rec-rationale,
+.holding-rec-risk {
+    margin: 0 0 0.65rem;
+    font-size: 0.85rem;
+    line-height: 1.55;
+    color: var(--text-secondary);
+}
+
+.holding-rec-risk {
+    color: var(--red);
+}
+
+.holding-rec-meta {
+    color: var(--text-muted);
+    font-size: 0.74rem;
+}
+
+.rec-review {
+    background: rgba(14, 165, 233, 0.12);
+    color: var(--accent-cyan);
+    border: 1px solid rgba(14, 165, 233, 0.25);
+}
+
+@media (max-width: 820px) {
+    .holdings-ai-header,
+    .holding-rec-summary {
+        flex-direction: column;
+    }
+
+    .holdings-ai-refresh {
+        width: 100%;
+    }
+
+    .holding-rec-insights,
+    .holding-rec-grid {
+        grid-template-columns: 1fr;
+    }
 }
 
 /* ==================== AI Advisor Chat ==================== */

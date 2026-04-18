@@ -15,8 +15,17 @@ import logging
 from typing import Optional
 
 from config import settings
+from services.display_currency import format_display_money
 
 logger = logging.getLogger(__name__)
+
+
+def _normalize_lang(lang: str | None) -> str:
+    return "en" if lang == "en" else "zh"
+
+
+def _advisor_text(lang: str | None, zh: str, en: str) -> str:
+    return en if _normalize_lang(lang) == "en" else zh
 
 
 async def evaluate_trade(
@@ -24,7 +33,7 @@ async def evaluate_trade(
     action: str = "buy",
     amount_eur: Optional[float] = None,
     extra_context: Optional[str] = None,
-    lang: str = "de",
+    lang: str = "zh",
 ) -> dict:
     """Evaluiert eine Trade-Entscheidung mit AI + Function Calling.
 
@@ -38,17 +47,26 @@ async def evaluate_trade(
         dict mit AI-Bewertung, Score, Portfolio-Impact, Risiken
     """
     from state import portfolio_data
+    lang = _normalize_lang(lang)
 
     if not settings.gemini_configured:
         return {
-            "error": "Qwen API nicht konfiguriert. Bitte QWEN_API_KEY setzen.",
+            "error": _advisor_text(
+                lang,
+                "Qwen/千问 API 未配置，请设置 QWEN_API_KEY。",
+                "Qwen API is not configured. Please set QWEN_API_KEY.",
+            ),
             "recommendation": "unknown",
         }
 
     summary = portfolio_data.get("summary")
     if not summary or not summary.stocks:
         return {
-            "error": "Keine Portfolio-Daten vorhanden. Bitte zuerst einen Refresh starten.",
+            "error": _advisor_text(
+                lang,
+                "暂无组合数据，请先刷新或导入持仓。",
+                "No portfolio data yet. Please refresh or import holdings first.",
+            ),
             "recommendation": "unknown",
         }
 
@@ -220,6 +238,8 @@ def _build_portfolio_context(summary, ticker: str, action: str, amount_eur: Opti
 
     return {
         "total_value": round(total, 2),
+        "eur_usd_rate": getattr(summary, "eur_usd_rate", 1.08),
+        "eur_cny_rate": getattr(summary, "eur_cny_rate", 7.8),
         "num_positions": len(stocks),
         "total_pnl_pct": summary.total_pnl_percent,
         "fear_greed": summary.fear_greed.value if summary.fear_greed else None,
@@ -407,7 +427,7 @@ async def _call_gemini_with_tools(
     score_info: dict,
     portfolio_ctx: dict,
     extra_context: Optional[str],
-    lang: str = "de",
+    lang: str = "zh",
 ) -> dict:
     """Ruft Gemini 2.5 Pro mit Function Calling + Structured Output auf.
 
@@ -429,11 +449,12 @@ async def _call_gemini_with_tools(
     client = get_client()
 
     # System-Prompt (language-aware)
+    lang = _normalize_lang(lang)
     action_labels = {
-        "de": {"buy": "Kauf", "sell": "Verkauf", "increase": "Aufstocken"},
+        "zh": {"buy": "买入", "sell": "卖出", "increase": "加仓"},
         "en": {"buy": "Buy", "sell": "Sell", "increase": "Add to Position"},
     }
-    action_label = action_labels.get(lang, action_labels["de"]).get(action, action)
+    action_label = action_labels.get(lang, action_labels["zh"]).get(action, action)
 
     if lang == "en":
         system_prompt = (
@@ -445,11 +466,11 @@ async def _call_gemini_with_tools(
         )
     else:
         system_prompt = (
-            "Du bist ein erfahrener Portfolio-Advisor. Der User möchte einen Trade evaluieren. "
-            "Du hast Zugriff auf Tools um Portfolio-Daten und Aktien-Scores abzurufen. "
-            "Du kannst auch externe URLs lesen mit dem fetch_url_content Tool — "
-            "nutze es wenn der User Links teilt oder wenn du Artikel lesen möchtest. "
-            "Antworte auf Deutsch."
+            "你是一名经验丰富的投资组合顾问。用户希望评估一笔交易。"
+            "你可以使用工具获取组合数据和股票评分。"
+            "你也可以用 fetch_url_content 工具读取外部 URL，"
+            "当用户分享链接或需要阅读文章时使用。"
+            "请用中文回答。"
         )
 
     # User-Prompt
@@ -458,7 +479,7 @@ async def _call_gemini_with_tools(
             f"Evaluate the following trade: {action_label.upper()} {ticker}",
         ]
         if amount_eur:
-            user_prompt_parts.append(f"Planned amount: {amount_eur:,.0f} EUR")
+            user_prompt_parts.append(f"Planned amount: {format_display_money(amount_eur, portfolio_ctx, 'USD', digits=0)}")
         if extra_context:
             user_prompt_parts.append(f"\nExternal sources from user:\n{extra_context.strip()[:3000]}")
         user_prompt_parts.append(
@@ -467,15 +488,14 @@ async def _call_gemini_with_tools(
         )
     else:
         user_prompt_parts = [
-            f"Evaluiere folgenden Trade: {action_label.upper()} von {ticker}",
+            f"评估以下交易: {action_label} {ticker}",
         ]
         if amount_eur:
-            user_prompt_parts.append(f"Geplanter Betrag: {amount_eur:,.0f} EUR")
+            user_prompt_parts.append(f"计划金额: {format_display_money(amount_eur, portfolio_ctx, 'USD', digits=0)}")
         if extra_context:
-            user_prompt_parts.append(f"\nExterne Quellen vom User:\n{extra_context.strip()[:3000]}")
+            user_prompt_parts.append(f"\n用户提供的外部信息:\n{extra_context.strip()[:3000]}")
         user_prompt_parts.append(
-            "\nNutze die verfügbaren Tools um den Score und das Portfolio abzufragen, "
-            "dann erstelle eine professionelle Trade-Bewertung."
+            "\n请使用可用工具查询评分和组合情况，然后给出专业的交易评估。"
         )
     user_prompt = "\n".join(user_prompt_parts)
 
@@ -614,7 +634,7 @@ def _parse_ai_response(raw: str) -> dict:
 async def chat_with_advisor(
     message: str,
     history: list[dict] | None = None,
-    lang: str = "de",
+    lang: str = "zh",
 ) -> dict:
     """Freie Konversation mit dem AI Advisor.
 
@@ -629,23 +649,36 @@ async def chat_with_advisor(
         dict mit "response" (AI-Antwort), "history" (aktualisiert)
     """
     from state import portfolio_data
+    lang = _normalize_lang(lang)
 
     if not settings.gemini_configured:
         return {
-            "response": "⚠️ Qwen API nicht konfiguriert. Bitte QWEN_API_KEY setzen.",
+            "response": _advisor_text(
+                lang,
+                "⚠️ Qwen/千问 API 未配置，请设置 QWEN_API_KEY。",
+                "⚠️ Qwen API is not configured. Please set QWEN_API_KEY.",
+            ),
             "history": history or [],
         }
 
     summary = portfolio_data.get("summary")
     if not summary or not summary.stocks:
         return {
-            "response": "⚠️ Keine Portfolio-Daten vorhanden. Bitte zuerst einen Refresh starten.",
+            "response": _advisor_text(
+                lang,
+                "⚠️ 暂无组合数据，请先刷新或导入持仓。",
+                "⚠️ No portfolio data yet. Please refresh or import holdings first.",
+            ),
             "history": history or [],
         }
 
     if not message or not message.strip():
         return {
-            "response": "Bitte stelle eine Frage oder beschreibe deine Hypothese.",
+            "response": _advisor_text(
+                lang,
+                "请输入一个问题，或描述你的投资假设。",
+                "Please ask a question or describe your hypothesis.",
+            ),
             "history": history or [],
         }
 
@@ -680,7 +713,11 @@ async def chat_with_advisor(
     except Exception as e:
         logger.error(f"Chat Advisor Fehler: {e}")
         return {
-            "response": f"❌ Fehler bei der AI-Analyse: {str(e)}",
+            "response": _advisor_text(
+                lang,
+                f"❌ AI 分析失败: {str(e)}",
+                f"❌ AI analysis failed: {str(e)}",
+            ),
             "history": history or [],
         }
 
@@ -691,7 +728,7 @@ async def _call_gemini_chat(
     portfolio_ctx: dict,
     score_info: dict,
     summary,
-    lang: str = "de",
+    lang: str = "zh",
 ) -> str:
     """Gemini-Call für freie Chat-Konversation mit Function Calling."""
     import asyncio
@@ -705,15 +742,23 @@ async def _call_gemini_chat(
     )
 
     client = get_client()
+    lang = _normalize_lang(lang)
 
     # Portfolio-Zusammenfassung für System-Prompt
     positions_text = ""
     for p in portfolio_ctx.get("top_positions", [])[:15]:
-        positions_text += (
-            f"  {p['ticker']} ({p['name']}): "
-            f"Gewicht {p['weight']}%, Score {p.get('score', '?')}, "
-            f"Rating {p.get('rating', '?')}, P&L {p.get('pnl_pct', 0):.1f}%\n"
-        )
+        if lang == "en":
+            positions_text += (
+                f"  {p['ticker']} ({p['name']}): "
+                f"Weight {p['weight']}%, Score {p.get('score', '?')}, "
+                f"Rating {p.get('rating', '?')}, P&L {p.get('pnl_pct', 0):.1f}%\n"
+            )
+        else:
+            positions_text += (
+                f"  {p['ticker']} ({p['name']}): "
+                f"权重 {p['weight']}%, 评分 {p.get('score', '?')}, "
+                f"评级 {p.get('rating', '?')}, 盈亏 {p.get('pnl_pct', 0):.1f}%\n"
+            )
 
     sectors_text = ", ".join(
         f"{k} {v}%" for k, v in portfolio_ctx.get("sector_distribution", {}).items()
@@ -724,7 +769,7 @@ async def _call_gemini_chat(
             "You are an experienced portfolio advisor and financial analyst. "
             "The user has a personal stock portfolio and wants to discuss it with you.\n\n"
             f"PORTFOLIO OVERVIEW:\n"
-            f"  Total Value: {portfolio_ctx.get('total_value', 0):,.0f} EUR\n"
+            f"  Total Value: {format_display_money(portfolio_ctx.get('total_value', 0), portfolio_ctx, 'USD', digits=0)}\n"
             f"  Positions: {portfolio_ctx.get('num_positions', 0)}\n"
             f"  Total P&L: {portfolio_ctx.get('total_pnl_pct', 0):.1f}%\n"
             f"  Fear & Greed: {portfolio_ctx.get('fear_greed', '?')} ({portfolio_ctx.get('fear_greed_label', '?')})\n"
@@ -740,22 +785,22 @@ async def _call_gemini_chat(
         )
     else:
         system_prompt = (
-            "Du bist ein erfahrener Portfolio-Berater und Finanzanalyst. "
-            "Der User hat ein persönliches Aktienportfolio und möchte mit dir darüber diskutieren.\n\n"
-            f"PORTFOLIO-ÜBERSICHT:\n"
-            f"  Gesamtwert: {portfolio_ctx.get('total_value', 0):,.0f} EUR\n"
-            f"  Positionen: {portfolio_ctx.get('num_positions', 0)}\n"
-            f"  Gesamt P&L: {portfolio_ctx.get('total_pnl_pct', 0):.1f}%\n"
+            "你是一名经验丰富的投资组合顾问和金融分析师。"
+            "用户有一个个人股票组合，并希望与你讨论。\n\n"
+            f"组合概览:\n"
+            f"  总市值: {format_display_money(portfolio_ctx.get('total_value', 0), portfolio_ctx, 'USD', digits=0)}\n"
+            f"  持仓数: {portfolio_ctx.get('num_positions', 0)}\n"
+            f"  总盈亏: {portfolio_ctx.get('total_pnl_pct', 0):.1f}%\n"
             f"  Fear & Greed: {portfolio_ctx.get('fear_greed', '?')} ({portfolio_ctx.get('fear_greed_label', '?')})\n"
-            f"  Sektor-Verteilung: {sectors_text}\n\n"
-            f"POSITIONEN:\n{positions_text}\n"
-            "REGELN:\n"
-            "- Antworte auf Deutsch, klar und direkt\n"
-            "- Nutze die verfügbaren Tools um aktuelle Daten abzurufen wenn nötig\n"
-            "- Wenn der User URLs teilt, nutze das fetch_url_content Tool um den Inhalt zu lesen\n"
-            "- Beziehe dich auf das Portfolio wenn relevant\n"
-            "- Sei ehrlich über Unsicherheiten und Risiken\n"
-            "- Formatiere mit Markdown (fett, Listen, Überschriften)\n"
+            f"  行业分布: {sectors_text}\n\n"
+            f"持仓:\n{positions_text}\n"
+            "规则:\n"
+            "- 使用中文，清晰直接\n"
+            "- 需要时使用可用工具获取最新数据\n"
+            "- 如果用户分享 URL，使用 fetch_url_content 工具读取内容\n"
+            "- 相关时结合用户组合回答\n"
+            "- 对不确定性和风险保持诚实\n"
+            "- 使用 Markdown 格式（加粗、列表、标题）\n"
         )
 
     # Tool-Definitionen (gleiche wie bei evaluate)
@@ -841,4 +886,4 @@ async def _call_gemini_chat(
         )
         all_contents.append(response.candidates[0].content)
 
-    return response.text.strip() if response.text else "Keine Antwort erhalten."
+    return response.text.strip() if response.text else _advisor_text(lang, "未收到回答。", "No response received.")

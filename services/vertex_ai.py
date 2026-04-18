@@ -15,6 +15,7 @@ from typing import Any, Optional
 import httpx
 
 from config import settings
+from services.display_currency import format_display_money
 
 logger = logging.getLogger(__name__)
 
@@ -409,8 +410,8 @@ async def cache_portfolio_context(summary) -> Optional[str]:
         "Du bist ein professioneller Finanzanalyst. "
         "Hier ist der aktuelle Portfolio-Status:",
         "",
-        f"Portfolio-Wert: {summary.total_value:,.0f} EUR",
-        f"P&L: {summary.total_pnl:+,.0f} EUR ({summary.total_pnl_percent:+.1f}%)",
+        f"Portfolio-Wert: {format_display_money(summary.total_value, summary, digits=0)}",
+        f"P&L: {format_display_money(summary.total_pnl, summary, digits=0, signed=True)} ({summary.total_pnl_percent:+.1f}%)",
         f"Positionen: {summary.num_positions}",
     ]
 

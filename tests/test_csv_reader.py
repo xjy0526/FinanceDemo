@@ -7,6 +7,10 @@ from fetchers.csv_reader import (
     parse_csv_file,
     parse_csv_json,
     csv_positions_to_portfolio_format,
+    delete_csv_position,
+    save_csv_positions,
+    saved_csv_portfolio_exists,
+    upsert_csv_position,
     _parse_date,
     _normalize_rows,
 )
@@ -150,6 +154,83 @@ class TestParseCsvFile:
             result = parse_csv_file(f.name)
         os.unlink(f.name)
         assert len(result) == 1
+
+    def test_save_csv_positions_roundtrip(self, tmp_path):
+        path = tmp_path / "portfolio.csv"
+        positions = parse_csv_json([{
+            "ticker": "aapl",
+            "shares": "10",
+            "buy_price": "150",
+            "current_price": "175",
+            "buy_date": "2024-03-15",
+            "currency": "USD",
+            "sector": "Technology",
+            "name": "Apple Inc.",
+            "asset_type": "equity",
+            "market": "US",
+            "exchange": "NASDAQ",
+            "country": "US",
+        }])
+
+        saved = save_csv_positions(positions, path)
+        result = parse_csv_file(str(saved))
+
+        assert saved_csv_portfolio_exists(path)
+        assert len(result) == 1
+        assert result[0]["ticker"] == "AAPL"
+        assert result[0]["shares"] == 10.0
+        assert result[0]["current_price"] == 175.0
+        assert result[0]["name"] == "Apple Inc."
+
+    def test_upsert_csv_position_creates_and_updates(self, tmp_path):
+        path = tmp_path / "portfolio.csv"
+
+        positions, saved, replaced = upsert_csv_position({
+            "ticker": "AAPL",
+            "shares": "10",
+            "buy_price": "150",
+        }, path)
+        assert replaced is False
+        assert saved["ticker"] == "AAPL"
+        assert len(positions) == 1
+
+        positions, saved, replaced = upsert_csv_position({
+            "ticker": "AAPL",
+            "shares": "12",
+            "buy_price": "140",
+        }, path)
+        assert replaced is True
+        assert saved["shares"] == 12.0
+        assert len(positions) == 1
+
+        result = parse_csv_file(str(path))
+        assert result[0]["shares"] == 12.0
+        assert result[0]["buy_price"] == 140.0
+
+    def test_upsert_csv_position_can_rename_ticker(self, tmp_path):
+        path = tmp_path / "portfolio.csv"
+        upsert_csv_position({"ticker": "AAPL", "shares": "10", "buy_price": "150"}, path)
+
+        positions, saved, replaced = upsert_csv_position({
+            "ticker": "MSFT",
+            "shares": "5",
+            "buy_price": "280",
+        }, path, original_ticker="AAPL")
+
+        assert replaced is True
+        assert saved["ticker"] == "MSFT"
+        assert [p["ticker"] for p in positions] == ["MSFT"]
+
+    def test_delete_csv_position(self, tmp_path):
+        path = tmp_path / "portfolio.csv"
+        upsert_csv_position({"ticker": "AAPL", "shares": "10", "buy_price": "150"}, path)
+        upsert_csv_position({"ticker": "MSFT", "shares": "5", "buy_price": "280"}, path)
+
+        positions, deleted = delete_csv_position("AAPL", path)
+
+        assert deleted is True
+        assert [p["ticker"] for p in positions] == ["MSFT"]
+        assert [p["ticker"] for p in parse_csv_file(str(path))] == ["MSFT"]
 
 
 class TestParseDate:

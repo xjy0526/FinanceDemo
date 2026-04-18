@@ -343,8 +343,9 @@ class PortfolioSummary(BaseModel):
     fear_greed: Optional[FearGreedData] = None
     last_updated: datetime = Field(default_factory=_now_berlin)
     is_demo: bool = False
-    display_currency: str = "EUR"
+    display_currency: str = "USD"
     eur_usd_rate: float = 1.0  # 1 EUR = X USD
+    eur_cny_rate: float = 7.8  # 1 EUR = X CNY
     daily_total_change: float = 0.0       # Tagesänderung in EUR
     daily_total_change_pct: float = 0.0   # Tagesänderung in %
 

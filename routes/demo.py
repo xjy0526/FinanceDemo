@@ -103,6 +103,7 @@ def build_demo_portfolio() -> PortfolioSummary:
         fear_greed=fear_greed_data,
         is_demo=True,
         eur_usd_rate=1.08,
+        eur_cny_rate=7.80,
         daily_total_change=t["daily_total_eur"],
         daily_total_change_pct=t["daily_total_pct"],
     )
@@ -136,7 +137,10 @@ async def activate_demo():
         except Exception:
             pass
 
-        logger.info(f"🎭 Demo-Modus aktiviert: {summary.num_positions} Positionen, Wert: €{summary.total_value:,.2f}")
+        logger.info(
+            f"🎭 Demo-Modus aktiviert: {summary.num_positions} Positionen, "
+            f"Wert: ${summary.total_value * summary.eur_usd_rate:,.2f} USD"
+        )
         return {
             "status": "ok",
             "message": f"Demo-Portfolio geladen: {summary.num_positions} Positionen",
@@ -177,4 +181,3 @@ async def demo_status():
         "is_demo": is_demo,
         "num_positions": summary.num_positions if summary else 0,
     }
-

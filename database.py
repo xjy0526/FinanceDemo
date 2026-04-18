@@ -164,7 +164,7 @@ def save_snapshot(
          round(total_pnl, 2), num_positions, eur_usd_rate, ts),
     )
     conn.commit()
-    logger.info(f"📸 Snapshot gespeichert: {today} — €{total_value:,.2f}")
+    logger.info(f"📸 Snapshot gespeichert: {today} — ${total_value * eur_usd_rate:,.2f} USD")
 
 
 def load_snapshots(days: int = 90) -> list[dict]:
@@ -600,4 +600,3 @@ def shadow_save_config(config: dict):
                 pass  # Ungültige Werte ignorieren
     shadow_set_meta("config_json", _json.dumps(current))
     logger.info(f"⚙️ Shadow-Config gespeichert: {current}")
-

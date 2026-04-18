@@ -62,6 +62,11 @@ async def update_parqet() -> dict:
     Preise kommen von Parqet Performance API (Vortagesschluss).
     Kein yFinance, kein FMP — dauert nur 2-5 Sekunden.
     """
+    from fetchers.csv_reader import saved_csv_portfolio_exists
+
+    if saved_csv_portfolio_exists():
+        return await update_saved_csv_portfolio()
+
     if refresh_lock.locked():
         logger.info("Update bereits aktiv - überspringe")
         return {"status": "already_running"}
@@ -82,6 +87,7 @@ async def update_parqet() -> dict:
             # 2. Wechselkurse zentral laden
             converter = await CurrencyConverter.create()
             eur_usd_rate = converter.rates.eur_usd
+            eur_cny_rate = converter.rates.eur_cny
 
             # 3. Fetch stock names from yfinance (schnell, nutzt Cache)
             name_map = await _fetch_stock_names(positions)
@@ -133,7 +139,8 @@ async def update_parqet() -> dict:
                 tech_picks=prev_summary.tech_picks if prev_summary else [],
                 fear_greed=prev_summary.fear_greed if prev_summary else None,
                 eur_usd_rate=eur_usd_rate,
-                display_currency="EUR",
+                eur_cny_rate=eur_cny_rate,
+                display_currency="USD",
                 daily_total_change=t["daily_total_eur"],
                 daily_total_change_pct=t["daily_total_pct"],
             )
@@ -156,6 +163,7 @@ async def update_parqet() -> dict:
                 "total_eur": round(t["total_value"], 2),
                 "cash_eur": round(cash_eur, 2),
                 "eur_usd_rate": eur_usd_rate,
+                "eur_cny_rate": eur_cny_rate,
             }
 
         except Exception as e:
@@ -165,6 +173,56 @@ async def update_parqet() -> dict:
             return {"status": "error", "message": str(e)}
         finally:
             portfolio_data["refreshing"] = False
+
+
+async def update_saved_csv_portfolio() -> dict:
+    """Load the persisted CSV portfolio and store it in global dashboard state."""
+    from fetchers.csv_reader import (
+        csv_positions_to_portfolio_format,
+        parse_csv_file,
+        resolve_csv_path,
+    )
+
+    path = resolve_csv_path()
+    positions = parse_csv_file(str(path))
+    if not positions:
+        portfolio_data["summary"] = PortfolioSummary(display_currency="USD")
+        portfolio_data["last_refresh"] = datetime.now(tz=TZ_BERLIN)
+        portfolio_data["source"] = "csv"
+        logger.info("📄 Lokale CSV enthält keine Positionen: %s", path)
+        return {
+            "status": "empty",
+            "positions": 0,
+            "source": "csv",
+            "csv_path": str(path),
+        }
+
+    tickers = [
+        p["ticker"]
+        for p in positions
+        if p.get("asset_type") != "prediction_market"
+    ]
+    prices = {}
+    daily_changes = {}
+    try:
+        prices, daily_changes = await quick_price_update(tickers) if tickers else ({}, {})
+    except Exception as e:
+        logger.warning("Could not fetch live prices for saved CSV portfolio: %s", e)
+
+    portfolio_positions = csv_positions_to_portfolio_format(positions, prices)
+    result = await build_portfolio_from_csv(portfolio_positions, daily_changes)
+    result.update({
+        "status": "done",
+        "positions": result.get("num_positions", len(portfolio_positions)),
+        "source": "csv",
+        "csv_path": str(path),
+    })
+    logger.info(
+        "📄 Lokale CSV geladen: %s Positionen aus %s",
+        result["positions"],
+        path,
+    )
+    return result
 
 
 async def update_yfinance_prices() -> dict:
@@ -389,6 +447,7 @@ async def build_portfolio_from_csv(
     # Wechselkurse laden
     converter = await CurrencyConverter.create()
     eur_usd_rate = converter.rates.eur_usd
+    eur_cny_rate = converter.rates.eur_cny
 
     # Merge mit vorherigen Scores (falls existierendes Portfolio)
     prev_summary = portfolio_data.get("summary")
@@ -473,7 +532,8 @@ async def build_portfolio_from_csv(
         tech_picks=prev_summary.tech_picks if prev_summary else [],
         fear_greed=prev_summary.fear_greed if prev_summary else None,
         eur_usd_rate=eur_usd_rate,
-        display_currency="EUR",
+        eur_cny_rate=eur_cny_rate,
+        display_currency="USD",
         daily_total_change=t["daily_total_eur"],
         daily_total_change_pct=t["daily_total_pct"],
     )
@@ -492,4 +552,5 @@ async def build_portfolio_from_csv(
         "total_value": t["total_value"],
         "num_positions": len(stocks),
         "eur_usd_rate": eur_usd_rate,
+        "eur_cny_rate": eur_cny_rate,
     }

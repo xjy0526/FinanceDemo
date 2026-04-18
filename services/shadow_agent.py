@@ -15,7 +15,7 @@ Regeln fuer den Agenten:
   - Max. 20 Positionen
   - Max. 10% Gewichtung pro Position
   - Min. 5% Cash-Reserve
-  - Kein Trade unter 500 EUR
+  - Kein Trade unter dem Mindestbetrag
   - Max. 3 Trades pro Zyklus
   - Sektor-Konzentration max. 35%
 """
@@ -27,6 +27,7 @@ from typing import Optional
 from zoneinfo import ZoneInfo
 
 from config import settings
+from services.display_currency import format_display_money
 
 logger = logging.getLogger(__name__)
 TZ_BERLIN = ZoneInfo("Europe/Berlin")
@@ -170,10 +171,10 @@ async def _ensure_initialized(summary) -> bool:
     if cash <= 0:
         # Fallback: 5% des Portfolio-Werts
         cash = summary.total_value * 0.05
-        logger.warning(f"Kein Cash-Bestand gefunden — nutze Fallback: {cash:.2f} EUR")
+        logger.warning(f"Kein Cash-Bestand gefunden — nutze Fallback: {format_display_money(cash, summary)}")
 
     shadow_set_cash(cash)
-    logger.info(f"💶 Shadow-Startkapital (Cash): {cash:,.2f} EUR")
+    logger.info(f"💶 Shadow-Startkapital (Cash): {format_display_money(cash, summary)}")
 
     # Echte Portfolio-Positionen (ausser CASH) spiegeln
     count = 0
@@ -187,7 +188,7 @@ async def _ensure_initialized(summary) -> bool:
         avg_cost_eur = stock.position.avg_cost
         sector = stock.position.sector or "Unknown"
 
-        # Aktuellen EUR-Preis berechnen
+        # Aktuellen internen Basispreis berechnen
         current_price_eur = stock.position.current_value / shares if shares > 0 else avg_cost_eur
 
         shadow_upsert_position(
@@ -215,7 +216,7 @@ async def _ensure_initialized(summary) -> bool:
     shadow_set_meta("init_date", datetime.now(tz=TZ_BERLIN).isoformat())
     shadow_set_meta("start_capital_eur", str(round(cash + summary.total_value - _get_cash_position_value(summary), 2)))
 
-    logger.info(f"✅ Shadow-Portfolio initialisiert: {count} Positionen + {cash:,.2f} EUR Cash")
+    logger.info(f"✅ Shadow-Portfolio initialisiert: {count} Positionen + {format_display_money(cash, summary)} Cash")
     return True
 
 
@@ -526,6 +527,14 @@ async def _call_gemini_agent(context: dict, candidates: list[dict]) -> dict:
     shadow = context["shadow"]
     market = context["market"]
     rules = context["rules"]
+    money = lambda value, digits=2, signed=False: format_display_money(
+        value,
+        summary,
+        digits=digits,
+        signed=signed,
+    )
+    min_cash_value = shadow["total_value"] * rules["min_cash_pct"] / 100
+    max_buy_cash = max(0, shadow["cash"] - min_cash_value)
 
     # System-Prompt
     strategy_hints = {
@@ -540,10 +549,10 @@ async def _call_gemini_agent(context: dict, candidates: list[dict]) -> dict:
         "Du verwaltest ein fiktives Shadow-Portfolio mit Paper-Money. "
         "Deine Aufgabe: Analyse das Portfolio taeglich und triff eigenstaendig Kauf/Verkauf-Entscheidungen.\n\n"
         f"SHADOW-PORTFOLIO STATUS:\n"
-        f"  Gesamtwert: {shadow['total_value']:,.2f} EUR\n"
-        f"  Cash: {shadow['cash']:,.2f} EUR ({shadow['cash_pct']}%)\n"
-        f"  Investiert: {shadow['invested']:,.2f} EUR\n"
-        f"  P&L: {shadow['pnl_eur']:+,.2f} EUR ({shadow['pnl_pct']:+.1f}%)\n"
+        f"  Gesamtwert: {money(shadow['total_value'])}\n"
+        f"  Cash: {money(shadow['cash'])} ({shadow['cash_pct']}%)\n"
+        f"  Investiert: {money(shadow['invested'])}\n"
+        f"  P&L: {money(shadow['pnl_eur'], signed=True)} ({shadow['pnl_pct']:+.1f}%)\n"
         f"  Positionen: {shadow['num_positions']}/{rules['max_positions']}\n"
         f"  Fear & Greed: {market['fear_greed']}/100 ({market['fear_greed_label']})\n\n"
         f"STRATEGIE-MODUS: {rules.get('strategy_mode', 'balanced').upper()}\n"
@@ -551,8 +560,8 @@ async def _call_gemini_agent(context: dict, candidates: list[dict]) -> dict:
         f"REGELN (ZWINGEND einhalten):\n"
         f"  - Max {rules['max_positions']} Positionen\n"
         f"  - Max {rules['max_weight_pct']}% Gewichtung pro Position\n"
-        f"  - Min {rules['min_cash_pct']}% Cash-Reserve (= mind. {shadow['total_value'] * rules['min_cash_pct'] / 100:,.0f} EUR)\n"
-        f"  - Minimum Trade-Volumen: {rules['min_trade_eur']:,.0f} EUR\n"
+        f"  - Min {rules['min_cash_pct']}% Cash-Reserve (= mind. {money(min_cash_value, digits=0)})\n"
+        f"  - Minimum Trade-Volumen: {money(rules['min_trade_eur'], digits=0)}\n"
         f"  - Max {rules['max_trades_per_cycle']} Trades pro Zyklus\n"
         f"  - Max {rules['max_sector_pct']}% Sektor-Konzentration\n"
         f"  - Mindest-Score fuer Kaeufe: {rules['min_buy_score']}\n\n"
@@ -572,8 +581,8 @@ async def _call_gemini_agent(context: dict, candidates: list[dict]) -> dict:
     )
 
     positions_text = "\n".join(
-        f"  {p['ticker']}: {p['shares']:.4f} Stk. @ {p['avg_cost_eur']:.2f} EUR, "
-        f"Wert {p['value_eur']:,.2f} EUR ({p['weight_pct']:.1f}%), "
+        f"  {p['ticker']}: {p['shares']:.4f} Stk. @ {money(p['avg_cost_eur'])}, "
+        f"Wert {money(p['value_eur'])} ({p['weight_pct']:.1f}%), "
         f"P&L {p['pnl_pct']:+.1f}%, Sektor {p['sector']}"
         for p in shadow.get("positions", [])
     )
@@ -586,7 +595,7 @@ async def _call_gemini_agent(context: dict, candidates: list[dict]) -> dict:
         "1. Welche Positionen sollen verkauft werden? (Schlechter Score, Uebergewichtung, SELL-Signale)\n"
         "2. Welche neuen Positionen sollen gekauft werden? (BUY Score >= 60)\n"
         "3. Wie ist die allgemeine Marktlage zu bewerten?\n\n"
-        f"Maximale Cash-Verfuegbar fuer Kaeufe: {max(0, shadow['cash'] - shadow['total_value'] * rules['min_cash_pct'] / 100):,.0f} EUR\n"
+        f"Maximale Cash-Verfuegbar fuer Kaeufe: {money(max_buy_cash, digits=0)}\n"
         "Erstelle einen konkreten Trade-Plan als strukturiertes JSON-Objekt."
     )
 
@@ -726,7 +735,11 @@ async def _execute_trades(trades: list[dict], summary) -> list[dict]:
             continue
 
         if amount_eur < min_trade_eur:
-            logger.debug(f"Shadow Agent: Trade {ticker} unter Mindestvolumen ({amount_eur:.0f} < {min_trade_eur:.0f} EUR)")
+            logger.debug(
+                f"Shadow Agent: Trade {ticker} unter Mindestvolumen "
+                f"({format_display_money(amount_eur, summary, digits=0)} < "
+                f"{format_display_money(min_trade_eur, summary, digits=0)})"
+            )
             continue
 
         # Aktuellen Preis ermitteln
@@ -745,7 +758,10 @@ async def _execute_trades(trades: list[dict], summary) -> list[dict]:
             available_cash = max(0, cash - min_cash)
 
             if available_cash < min_trade_eur:
-                logger.info(f"Shadow Agent: Nicht genug Cash fuer {ticker} (Verfuegbar: {available_cash:.0f} EUR)")
+                logger.info(
+                    f"Shadow Agent: Nicht genug Cash fuer {ticker} "
+                    f"(Verfuegbar: {format_display_money(available_cash, summary, digits=0)})"
+                )
                 continue
 
             # Positions-Anzahl-Check
@@ -807,7 +823,11 @@ async def _execute_trades(trades: list[dict], summary) -> list[dict]:
                 "reason": reason,
             })
             trades_count += 1
-            logger.info(f"✅ Shadow BUY: {ticker} — {shares_bought:.4f} Stk. @ {current_price_eur:.2f} EUR = {actual_amount:,.2f} EUR")
+            logger.info(
+                f"✅ Shadow BUY: {ticker} — {shares_bought:.4f} Stk. @ "
+                f"{format_display_money(current_price_eur, summary)} = "
+                f"{format_display_money(actual_amount, summary)}"
+            )
 
         elif action == "sell":
             if ticker not in positions:
@@ -855,13 +875,17 @@ async def _execute_trades(trades: list[dict], summary) -> list[dict]:
                 "reason": reason,
             })
             trades_count += 1
-            logger.info(f"✅ Shadow SELL: {ticker} — {sell_shares:.4f} Stk. @ {current_price_eur:.2f} EUR = {actual_proceeds:,.2f} EUR")
+            logger.info(
+                f"✅ Shadow SELL: {ticker} — {sell_shares:.4f} Stk. @ "
+                f"{format_display_money(current_price_eur, summary)} = "
+                f"{format_display_money(actual_proceeds, summary)}"
+            )
 
     return executed
 
 
 async def _get_current_price_eur(ticker: str, summary) -> float:
-    """Ermittelt den aktuellen EUR-Preis einer Aktie."""
+    """Ermittelt den aktuellen internen Basispreis einer Aktie."""
     # 1. Aus Shadow-DB
     from database import shadow_get_positions
     for p in shadow_get_positions():

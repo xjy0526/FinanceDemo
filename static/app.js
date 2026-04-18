@@ -9,7 +9,8 @@ let sectorChart = null;
 let scoreChart = null;
 let currentFilter = 'all';
 let currentSort = 'score-desc';
-let displayCurrency = 'EUR'; // EUR or USD
+const savedDisplayCurrency = localStorage.getItem('financebro-currency');
+let displayCurrency = savedDisplayCurrency === 'CNY' ? 'CNY' : 'USD'; // USD or CNY
 let priceEventSource = null;
 let wsConnected = false;
 
@@ -54,15 +55,71 @@ function localizeTradeAction(action) {
     return labels[action] || action;
 }
 
-function getRate() {
+function localizeServerMessage(message, fallbackZh = '操作失败', fallbackEn = 'Operation failed') {
+    if (!message) return isZh() ? fallbackZh : fallbackEn;
+    const text = String(message);
+    const rules = [
+        {
+            test: /Qwen API nicht konfiguriert|QWEN_API_KEY|Qwen not configured/i,
+            zh: '千问 API 未配置，请设置 QWEN_API_KEY。',
+            en: 'Qwen API is not configured. Please set QWEN_API_KEY.',
+        },
+        {
+            test: /Keine Portfolio-Daten|No portfolio data/i,
+            zh: '暂无组合数据，请先刷新或导入持仓。',
+            en: 'No portfolio data yet. Please refresh or import holdings first.',
+        },
+        {
+            test: /Daten werden geladen|data (is )?loading/i,
+            zh: '数据正在加载，请稍后再试。',
+            en: 'Data is loading. Please try again shortly.',
+        },
+        {
+            test: /Bitte einen Ticker|Please enter a ticker/i,
+            zh: '请输入一个代码（例如 NVDA、AAPL）。',
+            en: 'Please enter a ticker (e.g. NVDA, AAPL).',
+        },
+        {
+            test: /Bitte eine Nachricht|Please enter a message/i,
+            zh: '请输入一条消息。',
+            en: 'Please enter a message.',
+        },
+        {
+            test: /Fehler bei der AI-Analyse|AI analysis failed/i,
+            zh: 'AI 分析失败。',
+            en: 'AI analysis failed.',
+        },
+    ];
+    const matched = rules.find(rule => rule.test.test(text));
+    return matched ? (isZh() ? matched.zh : matched.en) : text;
+}
+
+function getUsdRate() {
     return portfolioData?.eur_usd_rate || 1.08;
+}
+
+function getCnyRate() {
+    return portfolioData?.eur_cny_rate || 7.8;
+}
+
+function getDisplayRate() {
+    return displayCurrency === 'CNY' ? getCnyRate() : getUsdRate();
 }
 
 function toDisplay(eurValue) {
     if (eurValue == null) return null;
-    // Backend liefert alle Werte bereits in EUR
-    if (displayCurrency === 'USD') return eurValue * getRate();
-    return eurValue;  // EUR → passthrough
+    // Backend values remain EUR-based; the UI only shows USD/CNY.
+    return eurValue * getDisplayRate();
+}
+
+function fromDisplay(displayValue) {
+    const rate = getDisplayRate();
+    return rate > 0 ? displayValue / rate : displayValue;
+}
+
+function visibleCurrencyCode(code) {
+    const normalized = String(code || '').toUpperCase();
+    return normalized === 'EUR' || !normalized ? displayCurrency : normalized;
 }
 
 function getAssetLabel(pos) {
@@ -121,7 +178,7 @@ async function loadPortfolio() {
         portfolioData = await res.json();
         renderDashboard();
     } catch (err) {
-        console.error('Portfolio laden fehlgeschlagen:', err);
+        console.error('Portfolio load failed:', err);
         setTimeout(loadPortfolio, 3000); // Retry
         if (isFirstLoad) showSkeleton(false);
     }
@@ -152,7 +209,7 @@ function renderDashboard() {
                 renderAnalyseTab();
             }
         } catch (err) {
-            console.error('renderDashboard Fehler:', err);
+            console.error('renderDashboard failed:', err);
         } finally {
             showSkeleton(false);
             // Re-create Lucide icons for dynamically added content
@@ -164,7 +221,7 @@ function renderDashboard() {
 function renderHeader() {
     const d = portfolioData;
 
-    // Demo UI state (badge, banner, button)
+    // Keep legacy sample-data state hidden from the product UI.
     updateDemoUI();
 
     // Portfolio value (converted)
@@ -181,9 +238,10 @@ function renderHeader() {
     // Daily change (Heute)
     const dailyEl = document.getElementById('dailyChange');
     const dailyEur = d.daily_total_change || 0;
+    const dailyDisplay = toDisplay(dailyEur);
     const dailyPct = d.daily_total_change_pct || 0;
     const dSign = dailyEur >= 0 ? '+' : '';
-    document.getElementById('dailyPnl').textContent = `${dSign}${formatCurrency(dailyEur)}`;
+    document.getElementById('dailyPnl').textContent = `${dSign}${formatCurrency(dailyDisplay)}`;
     document.getElementById('dailyPnlPct').textContent = `(${dSign}${dailyPct.toFixed(2)}%)`;
     dailyEl.className = `portfolio-pnl daily-change ${dailyEur >= 0 ? 'pnl-positive' : 'pnl-negative'}`;
 
@@ -211,9 +269,10 @@ function renderHeader() {
     const toggleEl = document.getElementById('currencyToggle');
     if (toggleEl) {
         toggleEl.textContent = displayCurrency;
+        const usdCny = getUsdRate() > 0 ? getCnyRate() / getUsdRate() : 0;
         toggleEl.title = isZh()
-            ? `汇率: 1 EUR = ${getRate().toFixed(4)} USD`
-            : `FX Rate: 1 EUR = ${getRate().toFixed(4)} USD`;
+            ? `点击切换 USD/CNY，参考汇率: 1 USD = ${usdCny.toFixed(4)} CNY`
+            : `Switch USD/CNY, reference: 1 USD = ${usdCny.toFixed(4)} CNY`;
     }
 
     // Last update
@@ -518,9 +577,9 @@ function renderRebalancing() {
     if (rb.total_buy_amount > 0 || rb.total_sell_amount > 0) {
         totalsHTML = `
             <div class="rebal-totals">
-                ${rb.total_sell_amount > 0 ? `<span class="rebal-total-sell">${isZh() ? '卖出' : 'Sell'}: ${formatCurrency(rb.total_sell_amount)}</span>` : ''}
-                ${rb.total_buy_amount > 0 ? `<span class="rebal-total-buy">${isZh() ? '买入' : 'Buy'}: ${formatCurrency(rb.total_buy_amount)}</span>` : ''}
-                <span class="rebal-total-net">${isZh() ? '净额' : 'Net'}: ${formatCurrency(rb.net_rebalance)}</span>
+                ${rb.total_sell_amount > 0 ? `<span class="rebal-total-sell">${isZh() ? '卖出' : 'Sell'}: ${formatBaseCurrency(rb.total_sell_amount)}</span>` : ''}
+                ${rb.total_buy_amount > 0 ? `<span class="rebal-total-buy">${isZh() ? '买入' : 'Buy'}: ${formatBaseCurrency(rb.total_buy_amount)}</span>` : ''}
+                <span class="rebal-total-net">${isZh() ? '净额' : 'Net'}: ${formatBaseCurrency(rb.net_rebalance)}</span>
             </div>
         `;
     }
@@ -564,7 +623,7 @@ function renderRebalancing() {
                     <span class="rebal-weight target">${a.target_weight.toFixed(1)}%</span>
                 </div>
                 <div class="rebal-amount">
-                    ${a.action !== 'Halten' ? `${formatCurrency(a.amount_eur)} (${a.shares_delta > 0 ? '+' : ''}${a.shares_delta.toFixed(1)} ${isZh() ? '股' : 'sh'})` : ''}
+                    ${a.action !== 'Halten' ? `${formatBaseCurrency(a.amount_eur)} (${a.shares_delta > 0 ? '+' : ''}${a.shares_delta.toFixed(1)} ${isZh() ? '股' : 'sh'})` : ''}
                 </div>
                 <div class="rebal-reasons">${reasonsList}</div>
             </div>
@@ -607,15 +666,15 @@ function renderTechPicks() {
                 </div>
                 <div class="tech-stats">
                     <div>
-                        <div class="tech-stat-label">Kurs</div>
-                        <div class="tech-stat-value">${formatCurrency(p.current_price)}</div>
+                        <div class="tech-stat-label">${isZh() ? '价格' : 'Price'}</div>
+                        <div class="tech-stat-value">${formatBaseCurrency(p.current_price)}</div>
                     </div>
                     <div>
-                        <div class="tech-stat-label">Upside</div>
+                        <div class="tech-stat-label">${isZh() ? '上行空间' : 'Upside'}</div>
                         <div class="tech-stat-value">${upsideStr}</div>
                     </div>
                     <div>
-                        <div class="tech-stat-label">Revenue</div>
+                        <div class="tech-stat-label">${isZh() ? '收入增长' : 'Revenue'}</div>
                         <div class="tech-stat-value">${p.revenue_growth != null ? (p.revenue_growth > 0 ? '+' : '') + p.revenue_growth.toFixed(0) + '%' : '–'}</div>
                     </div>
                     <div>
@@ -623,11 +682,11 @@ function renderTechPicks() {
                         <div class="tech-stat-value">${p.roe != null ? p.roe.toFixed(0) + '%' : '–'}</div>
                     </div>
                     <div>
-                        <div class="tech-stat-label">PE Ratio</div>
+                        <div class="tech-stat-label">${isZh() ? '市盈率' : 'PE Ratio'}</div>
                         <div class="tech-stat-value">${p.pe_ratio != null ? p.pe_ratio.toFixed(1) : '–'}</div>
                     </div>
                     <div>
-                        <div class="tech-stat-label">Analyst</div>
+                        <div class="tech-stat-label">${isZh() ? '分析师' : 'Analyst'}</div>
                         <div class="tech-stat-value">${p.analyst_rating || '–'}</div>
                     </div>
                 </div>
@@ -652,17 +711,25 @@ async function openStockDetail(ticker) {
     const score = stock.score;
     const fd = stock.fundamentals;
     const analyst = stock.analyst;
+    const zh = isZh();
+    const label = (zhText, enText) => zh ? zhText : enText;
+    const ratingText = (score?.rating || 'hold').toLowerCase();
+    const ratingLabelMap = {
+        buy: label('买入', 'BUY'),
+        hold: label('持有', 'HOLD'),
+        sell: label('卖出', 'SELL'),
+    };
 
     // Header
     document.getElementById('modalTitle').innerHTML = `
         <span style="color:var(--accent-blue)">${pos.ticker}</span> ${pos.name}
-        <div class="modal-subtitle">${pos.sector} | ${pos.currency} | ${getAssetLabel(pos)}</div>
+        <div class="modal-subtitle">${pos.sector} | ${visibleCurrencyCode(pos.currency)} | ${getAssetLabel(pos)}</div>
     `;
 
     const ratingClass = score?.rating || 'hold';
     document.getElementById('modalRating').innerHTML = `
         <span class="rating-badge rating-${ratingClass}" style="font-size:0.85rem;padding:0.4rem 1rem;">
-            ${(score?.rating || 'HOLD').toUpperCase()} – Score: ${(score?.total_score || 0).toFixed(1)}/100
+            ${ratingLabelMap[ratingText] || (score?.rating || 'HOLD').toUpperCase()} – ${label('评分', 'Score')}: ${(score?.total_score || 0).toFixed(1)}/100
         </span>
     `;
 
@@ -674,13 +741,13 @@ async function openStockDetail(ticker) {
     const srcItems = [
         { key: 'parqet', label: 'Parqet' },
         { key: 'fmp', label: 'FMP' },
-        { key: 'technical', label: 'Technical' },
+        { key: 'technical', label: label('技术面', 'Technical') },
         { key: 'yfinance', label: 'Yahoo' },
-        { key: 'fear_greed', label: 'Fear&Greed' },
+        { key: 'fear_greed', label: label('恐惧贪婪', 'Fear&Greed') },
     ];
     overviewHTML += `
         <div class="modal-section">
-            <div class="modal-section-title">${isZh() ? '数据来源' : 'Data Sources'}</div>
+            <div class="modal-section-title">${label('数据来源', 'Data Sources')}</div>
             <div class="source-status-row">
                 ${srcItems.map(s => `
                     <span class="source-badge ${ds[s.key] ? 'source-ok' : 'source-miss'}">
@@ -696,13 +763,13 @@ async function openStockDetail(ticker) {
         const bd = score.breakdown;
         const items = [
             { label: t('quality'), value: bd.quality_score || bd.fundamental_score || 0, weight: '20%' },
-            { label: isZh() ? '估值' : 'Valuation', value: bd.valuation_score || 0, weight: '15%' },
-            { label: isZh() ? '分析师' : 'Analysts', value: bd.analyst_score || 0, weight: '15%' },
+            { label: label('估值', 'Valuation'), value: bd.valuation_score || 0, weight: '15%' },
+            { label: label('分析师', 'Analysts'), value: bd.analyst_score || 0, weight: '15%' },
             { label: t('technical'), value: bd.technical_score || 0, weight: '15%' },
-            { label: isZh() ? '成长' : 'Growth', value: bd.growth_score || 0, weight: '12%' },
-            { label: isZh() ? '量化' : 'Quantitative', value: bd.quantitative_score || 0, weight: '10%' },
-            { label: 'Sentiment', value: bd.sentiment_score || 0, weight: '8%' },
-            { label: 'Insider', value: bd.insider_score || 0, weight: '3%' },
+            { label: label('成长', 'Growth'), value: bd.growth_score || 0, weight: '12%' },
+            { label: label('量化', 'Quantitative'), value: bd.quantitative_score || 0, weight: '10%' },
+            { label: label('情绪', 'Sentiment'), value: bd.sentiment_score || 0, weight: '8%' },
+            { label: label('内部人', 'Insider'), value: bd.insider_score || 0, weight: '3%' },
             { label: 'ESG', value: bd.esg_score || 0, weight: '2%' },
         ];
         overviewHTML += `
@@ -729,7 +796,7 @@ async function openStockDetail(ticker) {
     // Price chart
     overviewHTML += `
         <div class="modal-section">
-            <div class="modal-section-title">📊 ${isZh() ? '价格走势' : 'Price Chart'}</div>
+            <div class="modal-section-title">📊 ${label('价格走势', 'Price Chart')}</div>
             <div class="modal-chart-controls">
                 <button class="filter-btn active" onclick="loadStockChart('${pos.ticker}', '1month', this)">1M</button>
                 <button class="filter-btn" onclick="loadStockChart('${pos.ticker}', '3month', this)">3M</button>
@@ -745,7 +812,7 @@ async function openStockDetail(ticker) {
     // Score-History Chart
     overviewHTML += `
         <div class="modal-section">
-            <div class="modal-section-title">📈 ${isZh() ? '评分走势' : 'Score History'}</div>
+            <div class="modal-section-title">📈 ${label('评分走势', 'Score History')}</div>
             <div style="height:140px;position:relative;">
                 <canvas id="scoreHistoryChart"></canvas>
             </div>
@@ -770,20 +837,20 @@ async function openStockDetail(ticker) {
         };
         fundHTML += `
             <div class="modal-section">
-                <div class="modal-section-title">${isZh() ? '基本面数据' : 'Fundamentals'}</div>
+                <div class="modal-section-title">${label('基本面数据', 'Fundamentals')}</div>
                 <div class="modal-metrics">
-                    ${metricItem('PE Ratio', fd.pe_ratio?.toFixed(1))}
-                    ${metricItem('PB Ratio', fd.pb_ratio?.toFixed(1))}
+                    ${metricItem(label('市盈率', 'PE Ratio'), fd.pe_ratio?.toFixed(1))}
+                    ${metricItem(label('市净率', 'PB Ratio'), fd.pb_ratio?.toFixed(1))}
                     ${metricItem('ROE', fmtPct(fd.roe))}
                     ${metricItem('ROIC', fmtPct(fd.roic))}
-                    ${metricItem('Debt/Equity', fd.debt_to_equity?.toFixed(2))}
-                    ${metricItem('Gross Margin', fmtPct(fd.gross_margin))}
-                    ${metricItem('Op. Margin', fmtPct(fd.operating_margin))}
-                    ${metricItem('Net Margin', fmtPct(fd.net_margin))}
+                    ${metricItem(label('负债权益比', 'Debt/Equity'), fd.debt_to_equity?.toFixed(2))}
+                    ${metricItem(label('毛利率', 'Gross Margin'), fmtPct(fd.gross_margin))}
+                    ${metricItem(label('经营利润率', 'Op. Margin'), fmtPct(fd.operating_margin))}
+                    ${metricItem(label('净利率', 'Net Margin'), fmtPct(fd.net_margin))}
                     ${metricItem('EV/EBITDA', fd.ev_to_ebitda?.toFixed(1))}
-                    ${metricItem('FCF Yield', fmtPct(fd.free_cashflow_yield))}
-                    ${metricItem('PEG Ratio', fd.peg_ratio?.toFixed(2))}
-                    ${metricItem('Mkt Cap', fd.market_cap ? formatLargeNumber(fd.market_cap) : null)}
+                    ${metricItem(label('自由现金流收益率', 'FCF Yield'), fmtPct(fd.free_cashflow_yield))}
+                    ${metricItem(label('PEG 比率', 'PEG Ratio'), fd.peg_ratio?.toFixed(2))}
+                    ${metricItem(label('市值', 'Mkt Cap'), fd.market_cap ? formatLargeNumber(fd.market_cap) : null)}
                     ${metricItem('Altman Z', fd.altman_z_score?.toFixed(1))}
                     ${metricItem('Piotroski', fd.piotroski_score != null ? fd.piotroski_score + '/9' : null)}
                 </div>
@@ -793,16 +860,16 @@ async function openStockDetail(ticker) {
     if (analyst && analyst.num_analysts > 0) {
         fundHTML += `
             <div class="modal-section">
-                <div class="modal-section-title">${isZh() ? '分析师' : 'Analysts'} (${analyst.num_analysts})</div>
+                <div class="modal-section-title">${label('分析师', 'Analysts')} (${analyst.num_analysts})</div>
                 <div class="modal-metrics">
-                    ${metricItem(isZh() ? '一致预期' : 'Consensus', analyst.consensus)}
-                    ${metricItem(isZh() ? '目标价' : 'Target Price', analyst.target_price ? formatCurrency(analyst.target_price) : null)}
-                    ${metricItem('Strong Buy', analyst.strong_buy_count)}
-                    ${metricItem('Buy', analyst.buy_count)}
-                    ${metricItem('Hold', analyst.hold_count)}
-                    ${metricItem('Sell', analyst.sell_count)}
-                    ${metricItem('Strong Sell', analyst.strong_sell_count)}
-                    ${metricItem('Upside', analyst.target_price && pos.current_price > 0
+                    ${metricItem(label('一致预期', 'Consensus'), analyst.consensus)}
+                    ${metricItem(label('目标价', 'Target Price'), analyst.target_price ? formatCurrency(analyst.target_price) : null)}
+                    ${metricItem(label('强烈买入', 'Strong Buy'), analyst.strong_buy_count)}
+                    ${metricItem(label('买入', 'Buy'), analyst.buy_count)}
+                    ${metricItem(label('持有', 'Hold'), analyst.hold_count)}
+                    ${metricItem(label('卖出', 'Sell'), analyst.sell_count)}
+                    ${metricItem(label('强烈卖出', 'Strong Sell'), analyst.strong_sell_count)}
+                    ${metricItem(label('上行空间', 'Upside'), analyst.target_price && pos.current_price > 0
                         ? ((analyst.target_price - pos.current_price) / pos.current_price * 100).toFixed(1) + '%'
                         : null)}
                 </div>
@@ -813,10 +880,10 @@ async function openStockDetail(ticker) {
     if (fmpRating && fmpRating.rating) {
         fundHTML += `
             <div class="modal-section">
-                <div class="modal-section-title">FMP Rating</div>
+                <div class="modal-section-title">${label('FMP 评级', 'FMP Rating')}</div>
                 <div class="modal-metrics">
-                    ${metricItem('Rating', fmpRating.rating)}
-                    ${metricItem('Score', fmpRating.rating_score + '/5')}
+                    ${metricItem(label('评级', 'Rating'), fmpRating.rating)}
+                    ${metricItem(label('评分', 'Score'), fmpRating.rating_score + '/5')}
                     ${metricItem('DCF', fmpRating.dcf_score + '/5')}
                     ${metricItem('ROE', fmpRating.roe_score + '/5')}
                     ${metricItem('ROA', fmpRating.roa_score + '/5')}
@@ -832,18 +899,18 @@ async function openStockDetail(ticker) {
         const insiderTotal = (yf.insider_buy_count || 0) + (yf.insider_sell_count || 0);
         const insiderRatio = insiderTotal > 0 ? ((yf.insider_buy_count / insiderTotal) * 100).toFixed(0) + '% ' + t('insiderBuysPct') : null;
         const esgLabel = yf.esg_risk_score != null ?
-            (yf.esg_risk_score <= 10 ? '🟢 Low' : yf.esg_risk_score <= 20 ? '🟢 Low' :
-                yf.esg_risk_score <= 30 ? '🟡 Medium' : yf.esg_risk_score <= 40 ? '🟠 High' : '🔴 Very High') : null;
+            (yf.esg_risk_score <= 10 ? `🟢 ${label('低', 'Low')}` : yf.esg_risk_score <= 20 ? `🟢 ${label('低', 'Low')}` :
+                yf.esg_risk_score <= 30 ? `🟡 ${label('中', 'Medium')}` : yf.esg_risk_score <= 40 ? `🟠 ${label('高', 'High')}` : `🔴 ${label('很高', 'Very High')}`) : null;
         fundHTML += `
             <div class="modal-section">
                 <div class="modal-section-title">Yahoo Finance</div>
                 <div class="modal-metrics">
-                    ${metricItem(isZh() ? '推荐意见' : 'Recommendation', yf.recommendation_trend)}
-                    ${metricItem('ESG Risk', yf.esg_risk_score != null ? yf.esg_risk_score.toFixed(1) + ' (' + esgLabel + ')' : null)}
+                    ${metricItem(label('推荐意见', 'Recommendation'), yf.recommendation_trend)}
+                    ${metricItem(label('ESG 风险', 'ESG Risk'), yf.esg_risk_score != null ? yf.esg_risk_score.toFixed(1) + ' (' + esgLabel + ')' : null)}
                     ${metricItem(t('insiderBuys'), yf.insider_buy_count || 0)}
                     ${metricItem(t('insiderSells'), yf.insider_sell_count || 0)}
-                    ${metricItem('Insider Ratio', insiderRatio)}
-                    ${metricItem('Earnings YoY', yf.earnings_growth_yoy != null ? (yf.earnings_growth_yoy > 0 ? '+' : '') + yf.earnings_growth_yoy.toFixed(1) + '%' : null)}
+                    ${metricItem(label('内部人买入占比', 'Insider Ratio'), insiderRatio)}
+                    ${metricItem(label('盈利同比', 'Earnings YoY'), yf.earnings_growth_yoy != null ? (yf.earnings_growth_yoy > 0 ? '+' : '') + yf.earnings_growth_yoy.toFixed(1) + '%' : null)}
                 </div>
             </div>
         `;
@@ -853,12 +920,12 @@ async function openStockDetail(ticker) {
     if (div && (div.yield_percent || div.annual_dividend)) {
         fundHTML += `
             <div class="modal-section">
-                <div class="modal-section-title">💰 Dividende</div>
+                <div class="modal-section-title">💰 ${label('分红', 'Dividend')}</div>
                 <div class="modal-metrics">
-                    ${metricItem('Rendite', div.yield_percent != null ? div.yield_percent.toFixed(2) + '%' : null)}
+                    ${metricItem(label('收益率', 'Yield'), div.yield_percent != null ? div.yield_percent.toFixed(2) + '%' : null)}
                     ${metricItem(t('annualPerShare'), div.annual_dividend != null ? formatCurrency(toDisplay(div.annual_dividend)) : null)}
-                    ${metricItem('Ex-Datum', div.ex_date)}
-                    ${metricItem('Frequenz', div.frequency)}
+                    ${metricItem(label('除权日', 'Ex-Date'), div.ex_date)}
+                    ${metricItem(label('频率', 'Frequency'), div.frequency)}
                 </div>
             </div>
         `;
@@ -871,18 +938,19 @@ async function openStockDetail(ticker) {
         const signalEmoji = tech.signal === 'Bullish' ? '📈' : tech.signal === 'Bearish' ? '📉' : '➡️';
         const rsiLabel = tech.rsi_14 != null ?
             (tech.rsi_14 > 70 ? t('overbought') : tech.rsi_14 < 30 ? t('oversold') : t('normal')) : null;
-        const crossLabel = tech.sma_cross === 'golden' ? '🟢 Golden Cross' : tech.sma_cross === 'death' ? '🔴 Death Cross' : '➡️ Neutral';
+        const crossLabel = tech.sma_cross === 'golden' ? `🟢 ${label('黄金交叉', 'Golden Cross')}` : tech.sma_cross === 'death' ? `🔴 ${label('死亡交叉', 'Death Cross')}` : `➡️ ${label('中性', 'Neutral')}`;
+        const signalLabel = tech.signal === 'Bullish' ? label('看涨', 'Bullish') : tech.signal === 'Bearish' ? label('看跌', 'Bearish') : label('中性', 'Neutral');
         techHTML += `
             <div class="modal-section">
-                <div class="modal-section-title">Technische Indikatoren</div>
+                <div class="modal-section-title">${label('技术指标', 'Technical Indicators')}</div>
                 <div class="modal-metrics">
-                    ${metricItem('Signal', signalEmoji + ' ' + tech.signal)}
+                    ${metricItem(label('信号', 'Signal'), signalEmoji + ' ' + signalLabel)}
                     ${metricItem('RSI(14)', tech.rsi_14 != null ? tech.rsi_14.toFixed(1) + ' (' + rsiLabel + ')' : null)}
-                    ${metricItem('SMA Cross', crossLabel)}
-                    ${metricItem('Momentum 30T', tech.momentum_30d != null ? (tech.momentum_30d > 0 ? '+' : '') + tech.momentum_30d.toFixed(1) + '%' : null)}
+                    ${metricItem(label('均线交叉', 'SMA Cross'), crossLabel)}
+                    ${metricItem(label('30日动量', 'Momentum 30D'), tech.momentum_30d != null ? (tech.momentum_30d > 0 ? '+' : '') + tech.momentum_30d.toFixed(1) + '%' : null)}
                     ${metricItem('SMA 50', tech.sma_50 != null ? tech.sma_50.toFixed(2) : null)}
                     ${metricItem('SMA 200', tech.sma_200 != null ? tech.sma_200.toFixed(2) : null)}
-                    ${metricItem('Preis vs SMA50', tech.price_vs_sma50 != null ? (tech.price_vs_sma50 > 0 ? '+' : '') + tech.price_vs_sma50.toFixed(1) + '%' : null)}
+                    ${metricItem(label('价格 vs SMA50', 'Price vs SMA50'), tech.price_vs_sma50 != null ? (tech.price_vs_sma50 > 0 ? '+' : '') + tech.price_vs_sma50.toFixed(1) + '%' : null)}
                 </div>
             </div>
         `;
@@ -890,16 +958,16 @@ async function openStockDetail(ticker) {
     const av = stock.alphavantage;
     if (av && (av.news_sentiment != null || av.rsi_14 != null || av.macd_signal)) {
         const sentimentLabel = av.news_sentiment != null ?
-            (av.news_sentiment > 0.15 ? '📈 Positiv' : av.news_sentiment < -0.15 ? '📉 Negativ' : '➡️ Neutral') : null;
+            (av.news_sentiment > 0.15 ? `📈 ${label('正面', 'Positive')}` : av.news_sentiment < -0.15 ? `📉 ${label('负面', 'Negative')}` : `➡️ ${label('中性', 'Neutral')}`) : null;
         const avRsiLabel = av.rsi_14 != null ?
             (av.rsi_14 > 70 ? t('overbought') : av.rsi_14 < 30 ? t('oversold') : t('normal')) : null;
         techHTML += `
             <div class="modal-section">
                 <div class="modal-section-title">Alpha Vantage</div>
                 <div class="modal-metrics">
-                    ${metricItem('News Sentiment', av.news_sentiment != null ? av.news_sentiment.toFixed(3) + ' (' + sentimentLabel + ')' : null)}
+                    ${metricItem(label('新闻情绪', 'News Sentiment'), av.news_sentiment != null ? av.news_sentiment.toFixed(3) + ' (' + sentimentLabel + ')' : null)}
                     ${metricItem('RSI (14)', av.rsi_14 != null ? av.rsi_14.toFixed(1) + ' (' + avRsiLabel + ')' : null)}
-                    ${metricItem('MACD Signal', av.macd_signal)}
+                    ${metricItem(label('MACD 信号', 'MACD Signal'), av.macd_signal)}
                 </div>
             </div>
         `;
@@ -1081,15 +1149,15 @@ function getFilteredSorted() {
     return stocks;
 }
 
-// ==================== Demo Mode ====================
 async function toggleDemo() {
     const btn = document.getElementById('btnDemo');
+    if (!btn) return;
     const isDemo = portfolioData?.is_demo || false;
 
     btn.disabled = true;
     btn.textContent = isDemo
         ? (isZh() ? '⏳ 加载中...' : '⏳ Loading...')
-        : (isZh() ? '⏳ 加载演示数据...' : '⏳ Load Demo...');
+        : (isZh() ? '⏳ 加载中...' : '⏳ Loading...');
 
     try {
         const endpoint = isDemo ? '/api/demo/deactivate' : '/api/demo/activate';
@@ -1123,10 +1191,10 @@ async function toggleDemo() {
             }
         }
     } catch (err) {
-        console.error('Demo toggle failed:', err);
+        console.error('Sample data toggle failed:', err);
         document.getElementById('lastUpdate').textContent = isZh()
-            ? '❌ 演示模式切换失败'
-            : '❌ Demo toggle failed';
+            ? '❌ 数据切换失败'
+            : '❌ Data switch failed';
     } finally {
         btn.disabled = false;
         updateDemoUI();
@@ -1134,25 +1202,20 @@ async function toggleDemo() {
 }
 
 function updateDemoUI() {
-    const isDemo = portfolioData?.is_demo || false;
     const btn = document.getElementById('btnDemo');
     const banner = document.getElementById('demoBanner');
     const badge = document.getElementById('demoBadge');
 
     if (btn) {
-        btn.innerHTML = isDemo
-            ? `<span class="refresh-icon">🔄</span> ${isZh() ? '真实数据' : 'Live Data'}`
-            : `<span class="refresh-icon">🎭</span> ${isZh() ? '演示' : 'Demo'}`;
-        btn.title = isDemo
-            ? t('switchToReal')
-            : (isZh() ? '加载模拟演示组合' : 'Load demo portfolio with mock data');
-        btn.classList.toggle('demo-active', isDemo);
+        btn.style.display = 'none';
+        btn.classList.remove('demo-active');
     }
     if (banner) {
-        banner.classList.toggle('active', isDemo);
+        banner.classList.remove('active');
+        banner.style.display = 'none';
     }
     if (badge) {
-        badge.style.display = isDemo ? 'inline-block' : 'none';
+        badge.style.display = 'none';
     }
 }
 
@@ -1173,14 +1236,15 @@ async function updateParqet() {
 
         if (result.status === 'done') {
             lastUpdate.textContent = isZh()
-                ? `✅ 已更新 ${result.positions} 个持仓，${formatLocalizedNumber(result.total_eur)} EUR（现金: ${formatLocalizedNumber(result.cash_eur)} EUR）`
-                : `✅ ${result.positions} positions, ${formatLocalizedNumber(result.total_eur)} EUR (Cash: ${formatLocalizedNumber(result.cash_eur)} EUR)`;
+                ? `✅ 已更新 ${result.positions} 个持仓，${formatBaseCurrency(result.total_eur)}（现金: ${formatBaseCurrency(result.cash_eur)}）`
+                : `✅ ${result.positions} positions, ${formatBaseCurrency(result.total_eur)} (Cash: ${formatBaseCurrency(result.cash_eur)})`;
             showToast(isZh() ? `已更新 ${result.positions} 个持仓` : `${result.positions} positions updated`, 'success');
             // Reload portfolio data
             await loadPortfolio();
         } else {
-            lastUpdate.textContent = `⚠️ ${result.message || (isZh() ? '错误' : 'Error')}`;
-            showToast(result.message || (isZh() ? '更新失败' : 'Update failed'), 'warning');
+            const message = localizeServerMessage(result.message, '更新失败', 'Update failed');
+            lastUpdate.textContent = `⚠️ ${message}`;
+            showToast(message, 'warning');
         }
     } catch (err) {
         console.error('Parqet update failed:', err);
@@ -1205,16 +1269,17 @@ async function triggerReport() {
         const result = await res.json();
 
         if (result.status === 'started') {
-            lastUpdate.textContent = `📨 ${result.message}`;
-            showToast('Telegram Report wird gesendet', 'success');
+            lastUpdate.textContent = isZh() ? '📨 Telegram 报告已开始发送' : '📨 Telegram report started';
+            showToast(isZh() ? 'Telegram 报告正在发送' : 'Telegram report is being sent', 'success');
         } else {
-            lastUpdate.textContent = `⚠️ ${result.message}`;
-            showToast(result.message, 'warning');
+            const message = localizeServerMessage(result.message, '报告发送失败', 'Report failed');
+            lastUpdate.textContent = `⚠️ ${message}`;
+            showToast(message, 'warning');
         }
     } catch (err) {
-        console.error('Telegram Report fehlgeschlagen:', err);
-        lastUpdate.textContent = '❌ Report fehlgeschlagen';
-        showToast('Telegram Report fehlgeschlagen', 'error');
+        console.error('Telegram report failed:', err);
+        lastUpdate.textContent = isZh() ? '❌ 报告发送失败' : '❌ Report failed';
+        showToast(isZh() ? 'Telegram 报告发送失败' : 'Telegram report failed', 'error');
     } finally {
         // Button nach 3s wieder freigeben (Report läuft im Background)
         setTimeout(() => {
@@ -1251,7 +1316,7 @@ async function _doRefresh(btnId, endpoint) {
 
         // Show status message
         const lastUpdate = document.getElementById('lastUpdate');
-        lastUpdate.textContent = result.message || t('fullAnalysisRunning');
+        lastUpdate.textContent = localizeServerMessage(result.message, t('fullAnalysisRunning'), t('fullAnalysisRunning'));
 
         // Poll for completion
         let attempts = 0;
@@ -1275,7 +1340,7 @@ async function _doRefresh(btnId, endpoint) {
             }
         }, 2000);
     } catch (err) {
-        console.error('Analyse fehlgeschlagen:', err);
+        console.error('Analysis failed:', err);
         if (btn) { btn.classList.remove('refreshing'); btn.disabled = false; }
         if (btnParqet) btnParqet.disabled = false;
         if (btnTelegram) btnTelegram.disabled = false;
@@ -1293,18 +1358,40 @@ function formatCurrency(val) {
     }).format(val);
 }
 
+function formatBaseCurrency(eurValue) {
+    if (eurValue === null || eurValue === undefined) return '–';
+    return formatCurrency(toDisplay(eurValue));
+}
+
 function toggleCurrency() {
-    displayCurrency = displayCurrency === 'EUR' ? 'USD' : 'EUR';
+    displayCurrency = displayCurrency === 'USD' ? 'CNY' : 'USD';
+    localStorage.setItem('financebro-currency', displayCurrency);
+    updateDynamicCurrencyLabels();
     renderDashboard();
 }
 
 function formatLargeNumber(val) {
-    const sym = displayCurrency === 'EUR' ? '€' : '$';
     const displayVal = toDisplay(val);
+    const sym = displayCurrency === 'CNY' ? '¥' : '$';
     if (displayVal >= 1e12) return `${sym}${(displayVal / 1e12).toFixed(1)}T`;
     if (displayVal >= 1e9) return `${sym}${(displayVal / 1e9).toFixed(1)}B`;
     if (displayVal >= 1e6) return `${sym}${(displayVal / 1e6).toFixed(1)}M`;
     return formatCurrency(displayVal);
+}
+
+function updateDynamicCurrencyLabels() {
+    document.querySelectorAll('[data-currency-code]').forEach(el => {
+        el.textContent = displayCurrency;
+    });
+    document.querySelectorAll('[data-currency-label]').forEach(el => {
+        const key = el.getAttribute('data-currency-label');
+        if (key === 'amount') {
+            el.textContent = `${t('amount')} (${displayCurrency})`;
+        }
+    });
+    if (document.getElementById('cfgMinTrade')) {
+        updateSliderValue('cfgMinTrade', 'valMinTrade', '', '');
+    }
 }
 
 function showSkeleton(show) {
@@ -1359,7 +1446,7 @@ function startPriceStream() {
             setTimeout(startPriceStream, 5000);
         };
     } catch (e) {
-        console.log('SSE nicht verfügbar:', e);
+        console.log('SSE unavailable:', e);
     }
 }
 
@@ -1485,7 +1572,7 @@ async function renderAnalyseTab() {
             const sectors = await sectorRes.json();
             renderSectorChart(sectors);
         }
-    } catch (e) { console.log('Sektor-Daten nicht verfügbar'); }
+    } catch (e) { console.log('Sector data unavailable'); }
 
     // Parallel laden
     renderRisk();
@@ -1529,7 +1616,7 @@ async function renderMovers() {
                 </div>
                 <div class="mover-values">
                     <span class="mover-pct">+${m.daily_pct.toFixed(2)}%</span>
-                    <span class="mover-eur">+${formatCurrency(m.daily_eur)}</span>
+                    <span class="mover-eur">+${formatBaseCurrency(m.daily_eur)}</span>
                 </div>
             </div>
         `).join('') || `<div class="empty-state">${isZh() ? '今日暂无上涨标的' : 'No gainers today'}</div>`;
@@ -1542,7 +1629,7 @@ async function renderMovers() {
                 </div>
                 <div class="mover-values">
                     <span class="mover-pct">${m.daily_pct.toFixed(2)}%</span>
-                    <span class="mover-eur">${formatCurrency(m.daily_eur)}</span>
+                    <span class="mover-eur">${formatBaseCurrency(m.daily_eur)}</span>
                 </div>
             </div>
         `).join('') || `<div class="empty-state">${isZh() ? '今日暂无下跌标的' : 'No losers today'}</div>`;
@@ -1700,7 +1787,7 @@ async function renderDividends() {
             <div class="dividend-summary">
                 <div class="dividend-stat">
                     <span class="dividend-stat-label">${t('annualIncome')}</span>
-                    <span class="dividend-stat-value">${formatCurrency(data.total_annual_income)}</span>
+                    <span class="dividend-stat-value">${formatBaseCurrency(data.total_annual_income)}</span>
                 </div>
                 <div class="dividend-stat">
                     <span class="dividend-stat-label">${isZh() ? '组合股息率' : 'Portfolio Yield'}</span>
@@ -1720,7 +1807,7 @@ async function renderDividends() {
                     <div class="dividend-item">
                         <span class="dividend-ticker">${p.ticker}</span>
                         <span class="dividend-yield">${p.yield_pct}%</span>
-                    <span class="dividend-income">${formatCurrency(p.annual_income)}/${isZh() ? '年' : 'yr'}</span>
+                    <span class="dividend-income">${formatBaseCurrency(p.annual_income)}/${isZh() ? '年' : 'yr'}</span>
                     </div>
                 `).join('')}
             </div>
@@ -1959,12 +2046,12 @@ async function loadPerformanceChart(days, btn) {
                             backgroundColor: '#1a2035',
                             titleColor: '#f1f5f9',
                             bodyColor: '#94a3b8',
-                            callbacks: { label: c => `${formatCurrency(c.raw)}` }
+                            callbacks: { label: c => `${formatBaseCurrency(c.raw)}` }
                         }
                     },
                     scales: {
                         x: { display: true, grid: { display: false }, ticks: { color: '#64748b', maxTicksLimit: 8, font: { size: 10 } } },
-                        y: { display: true, grid: { color: 'rgba(255,255,255,0.04)' }, ticks: { color: '#64748b', callback: v => formatCurrency(v), font: { size: 10 } } }
+                        y: { display: true, grid: { color: 'rgba(255,255,255,0.04)' }, ticks: { color: '#64748b', callback: v => formatBaseCurrency(v), font: { size: 10 } } }
                     },
                     interaction: { intersect: false, mode: 'index' }
                 }
@@ -1973,7 +2060,7 @@ async function loadPerformanceChart(days, btn) {
         });
 
     } catch (e) {
-        console.log('Performance-Chart nicht verfügbar:', e);
+        console.log('Performance chart unavailable:', e);
     }
 }
 
@@ -2106,11 +2193,12 @@ function setAdvisorAction(action, btn) {
 async function submitAdvisorQuery() {
     const ticker = document.getElementById('advisorTicker')?.value?.trim().toUpperCase();
     if (!ticker) {
-        alert('Bitte gib einen Ticker ein (z.B. NVDA, AAPL)');
+        alert(isZh() ? '请输入一个代码（例如 NVDA、AAPL）' : 'Please enter a ticker (e.g. NVDA, AAPL)');
         return;
     }
 
     const amount = document.getElementById('advisorAmount')?.value || null;
+    const amountEur = amount ? fromDisplay(parseFloat(amount)) : null;
     const context = document.getElementById('advisorContext')?.value || null;
 
     // Loading state
@@ -2126,8 +2214,8 @@ async function submitAdvisorQuery() {
     resultDiv.innerHTML = `
         <div class="advisor-loading">
             <div class="advisor-loading-spinner"></div>
-            <p>🧠 AI analysiert <strong>${ticker}</strong>...</p>
-            <p class="advisor-loading-sub">Portfolio-Kontext, Score-Berechnung, Google Search Research</p>
+            <p>🧠 ${isZh() ? 'AI 正在分析' : 'AI is analyzing'} <strong>${ticker}</strong>...</p>
+            <p class="advisor-loading-sub">${isZh() ? '组合上下文、评分计算、外部资料研究' : 'Portfolio context, score calculation, external research'}</p>
         </div>
     `;
 
@@ -2138,7 +2226,7 @@ async function submitAdvisorQuery() {
             body: JSON.stringify({
                 ticker,
                 action: _advisorAction,
-                amount_eur: amount ? parseFloat(amount) : null,
+                amount_eur: amountEur,
                 extra_context: context || null,
                 lang: currentLang,
             }),
@@ -2146,7 +2234,8 @@ async function submitAdvisorQuery() {
         const data = await resp.json();
         renderAdvisorResult(data);
     } catch (e) {
-        resultDiv.innerHTML = `<div class="advisor-error">❌ Fehler: ${e.message}</div>`;
+        const message = localizeServerMessage(e.message, 'AI 分析失败', 'AI analysis failed');
+        resultDiv.innerHTML = `<div class="advisor-error">❌ ${_escapeHtml(message)}</div>`;
     } finally {
         btn.disabled = false;
         btnText.style.display = 'inline';
@@ -2157,7 +2246,7 @@ async function submitAdvisorQuery() {
 function renderAdvisorResult(data) {
     const resultDiv = document.getElementById('advisorResult');
     if (data.error) {
-        resultDiv.innerHTML = `<div class="advisor-error">⚠️ ${data.error}</div>`;
+        resultDiv.innerHTML = `<div class="advisor-error">⚠️ ${_escapeHtml(localizeServerMessage(data.error))}</div>`;
         return;
     }
 
@@ -2208,7 +2297,7 @@ function renderAdvisorResult(data) {
         <div class="advisor-result-header">
             <div>
                 <h3>${ticker} — ${localizeTradeAction(data.action)}</h3>
-                ${data.amount_eur ? `<span class="advisor-amount">${data.amount_eur.toLocaleString(getUiLocale())} EUR</span>` : ''}
+                ${data.amount_eur ? `<span class="advisor-amount">${formatBaseCurrency(data.amount_eur)}</span>` : ''}
             </div>
             <div class="advisor-rec-badge ${r.cls}">
                 <span class="advisor-rec-icon">${r.icon}</span>
@@ -2293,17 +2382,132 @@ let _chatHistory = [];
 function switchAdvisorMode(mode) {
     document.querySelectorAll('.advisor-mode-btn').forEach(b => b.classList.remove('active'));
     const analyseDiv = document.getElementById('advisorAnalyseMode');
+    const holdingsDiv = document.getElementById('advisorHoldingsMode');
     const chatDiv = document.getElementById('advisorChatMode');
     if (mode === 'chat') {
         document.getElementById('advisorModeChat').classList.add('active');
         analyseDiv.style.display = 'none';
+        if (holdingsDiv) holdingsDiv.style.display = 'none';
         chatDiv.style.display = 'block';
         setTimeout(() => document.getElementById('advisorChatInput')?.focus(), 100);
+    } else if (mode === 'holdings') {
+        document.getElementById('advisorModeHoldings')?.classList.add('active');
+        analyseDiv.style.display = 'none';
+        if (holdingsDiv) holdingsDiv.style.display = 'block';
+        chatDiv.style.display = 'none';
+        loadHoldingRecommendations(false);
     } else {
         document.getElementById('advisorModeAnalyse').classList.add('active');
         analyseDiv.style.display = 'block';
+        if (holdingsDiv) holdingsDiv.style.display = 'none';
         chatDiv.style.display = 'none';
     }
+}
+
+let _holdingRecommendationsLoaded = false;
+
+async function loadHoldingRecommendations(force = false) {
+    const resultEl = document.getElementById('holdingRecommendationsResult');
+    const btn = document.getElementById('holdingRecommendationsBtn');
+    if (!resultEl) return;
+    if (_holdingRecommendationsLoaded && !force) return;
+
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = `<i data-lucide="loader-2"></i> ${t('holdingRecommendationsLoading')}`;
+        if (window.lucide) lucide.createIcons();
+    }
+    resultEl.innerHTML = `<div class="advisor-loading"><div class="advisor-loading-spinner"></div><p>${t('holdingRecommendationsLoading')}</p></div>`;
+
+    try {
+        const resp = await fetch(`/api/advisor/holding-recommendations?lang=${encodeURIComponent(currentLang)}`);
+        const data = await resp.json();
+        if (!resp.ok || data.error) {
+            throw new Error(data.error || `HTTP ${resp.status}`);
+        }
+        _holdingRecommendationsLoaded = true;
+        renderHoldingRecommendations(data);
+    } catch (err) {
+        resultEl.innerHTML = `<div class="advisor-error">⚠️ ${t('holdingRecommendationsError')}: ${_escapeHtml(err.message)}</div>`;
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = `<i data-lucide="sparkles"></i> ${_holdingRecommendationsLoaded ? t('refreshHoldingRecommendations') : t('generateHoldingRecommendations')}`;
+            if (window.lucide) lucide.createIcons();
+        }
+    }
+}
+
+function renderHoldingRecommendations(data) {
+    const resultEl = document.getElementById('holdingRecommendationsResult');
+    if (!resultEl) return;
+
+    const actionMeta = {
+        add: { label: isZh() ? '加仓' : 'Add', cls: 'rec-buy' },
+        hold: { label: isZh() ? '持有' : 'Hold', cls: 'rec-hold' },
+        trim: { label: isZh() ? '降权' : 'Trim', cls: 'rec-reduce' },
+        reduce: { label: isZh() ? '减仓' : 'Reduce', cls: 'rec-avoid' },
+        review: { label: isZh() ? '复核' : 'Review', cls: 'rec-review' },
+    };
+    const sourceLabel = data.source === 'qwen' ? t('holdingRecommendationSourceQwen') : t('holdingRecommendationSourceRule');
+    const recs = data.recommendations || [];
+    const keyActions = data.key_actions || [];
+    const risks = data.risk_warnings || [];
+
+    const recCards = recs.map(item => {
+        const meta = actionMeta[item.action] || actionMeta.hold;
+        const weightText = `${Number(item.current_weight_pct || 0).toFixed(1)}% → ${Number(item.target_weight_pct || 0).toFixed(1)}%`;
+        return `
+            <div class="holding-rec-card">
+                <div class="holding-rec-topline">
+                    <div>
+                        <strong>${_escapeHtml(item.ticker || '')}</strong>
+                        <span>${_escapeHtml(item.name || '')}</span>
+                    </div>
+                    <span class="advisor-rec-badge ${meta.cls}">${meta.label}</span>
+                </div>
+                <div class="holding-rec-metrics">
+                    <span>Score <strong>${Number(item.score || 0).toFixed(0)}</strong></span>
+                    <span>${isZh() ? '权重' : 'Weight'} <strong>${weightText}</strong></span>
+                    <span>${isZh() ? '优先级' : 'Priority'} <strong>${item.priority || 0}/10</strong></span>
+                    <span>${isZh() ? '置信度' : 'Confidence'} <strong>${item.confidence || 0}%</strong></span>
+                </div>
+                <p class="holding-rec-rationale">${_escapeHtml(item.rationale || '')}</p>
+                <p class="holding-rec-risk">${_escapeHtml(item.risk || '')}</p>
+                <div class="holding-rec-meta">${_escapeHtml(item.market || '')} · ${_escapeHtml(item.asset_type || '')} · P&L ${Number(item.pnl_pct || 0).toFixed(1)}%</div>
+            </div>
+        `;
+    }).join('');
+
+    resultEl.innerHTML = `
+        <div class="holding-rec-summary">
+            <div>
+                <span class="advisor-score-meta">${sourceLabel}</span>
+                <h3>${t('portfolioView')}: ${_escapeHtml(data.portfolio_view || '-')}</h3>
+                <p>${_escapeHtml(data.summary || '')}</p>
+            </div>
+            <div class="holding-rec-score">
+                <strong>${Number(data.portfolio_score || 0).toFixed(0)}</strong>
+                <span>/100</span>
+            </div>
+        </div>
+
+        ${data.ai_note ? `<div class="holding-rec-note">${_escapeHtml(data.ai_note)}</div>` : ''}
+
+        <div class="holding-rec-insights">
+            <div class="advisor-section">
+                <h4>${t('keyActions')}</h4>
+                <ul class="advisor-risks">${keyActions.map(x => `<li>${_escapeHtml(x)}</li>`).join('') || `<li>–</li>`}</ul>
+            </div>
+            <div class="advisor-section">
+                <h4>${t('riskWarnings')}</h4>
+                <ul class="advisor-risks">${risks.map(x => `<li>${_escapeHtml(x)}</li>`).join('') || `<li>–</li>`}</ul>
+            </div>
+        </div>
+
+        <div class="holding-rec-grid">${recCards || `<div class="empty-state">${isZh() ? '暂无持仓建议' : 'No holding recommendations available'}</div>`}</div>
+        <div class="holding-rec-next">${t('nextReview')}: ${_escapeHtml(data.next_review || '')}</div>
+    `;
 }
 
 function sendChatSuggestion(btn) {
@@ -2384,7 +2588,7 @@ async function sendAdvisorChat() {
         if (data.error) {
             messagesDiv.innerHTML += `
                 <div class="chat-msg chat-msg-ai">
-                    <div class="chat-msg-content chat-msg-error">⚠️ ${data.error}</div>
+                    <div class="chat-msg-content chat-msg-error">⚠️ ${_escapeHtml(localizeServerMessage(data.error))}</div>
                 </div>`;
         } else {
             _chatHistory = data.history || [];
@@ -2396,9 +2600,10 @@ async function sendAdvisorChat() {
         }
     } catch (e) {
         document.getElementById('chatTyping')?.remove();
+        const message = localizeServerMessage(e.message, '聊天请求失败', 'Chat request failed');
         messagesDiv.innerHTML += `
             <div class="chat-msg chat-msg-ai">
-                <div class="chat-msg-content chat-msg-error">❌ ${e.message}</div>
+                <div class="chat-msg-content chat-msg-error">❌ ${_escapeHtml(message)}</div>
             </div>`;
     }
 
@@ -2455,7 +2660,12 @@ let _performanceData = null;
 
 function formatEur(val) {
     if (val === null || val === undefined) return '—';
-    return val.toLocaleString(getUiLocale(), { style: 'currency', currency: 'EUR', minimumFractionDigits: 0, maximumFractionDigits: 0 });
+    return toDisplay(val).toLocaleString(getUiLocale(), {
+        style: 'currency',
+        currency: displayCurrency,
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 0,
+    });
 }
 
 async function loadPerformanceKPIs() {
@@ -2470,7 +2680,7 @@ async function loadPerformanceKPIs() {
         if (_performanceData.error) { _performanceData = null; return; }
         renderPerformanceKPIs(_performanceData);
     } catch (e) {
-        console.error('Performance KPIs laden fehlgeschlagen:', e);
+        console.error('Performance KPI load failed:', e);
     }
 }
 
@@ -2501,7 +2711,9 @@ function renderPerformanceKPIs(data) {
     // Interval
     const intervalEl = document.getElementById('kpiInterval');
     if (kpis.interval) {
-        intervalEl.textContent = `Zeitraum: ${kpis.interval.start} → ${kpis.interval.end} | ${activeHoldings} aktiv, ${soldHoldings} verkauft`;
+        intervalEl.textContent = isZh()
+            ? `区间: ${kpis.interval.start} → ${kpis.interval.end} | ${activeHoldings} 个持有中，${soldHoldings} 个已卖出`
+            : `Period: ${kpis.interval.start} → ${kpis.interval.end} | ${activeHoldings} active, ${soldHoldings} sold`;
     }
 
     container.style.display = 'block';
@@ -2630,7 +2842,7 @@ async function loadHistorie(period, btn) {
     try {
         const res = await fetch(`/api/portfolio/history-detail?period=${period}`);
         if (!res.ok) {
-            console.error('Historie laden fehlgeschlagen:', res.status);
+            console.error('History load failed:', res.status);
             if (loadingEl) loadingEl.style.display = 'none';
             if (canvasEl) canvasEl.style.opacity = '1';
             return;
@@ -2645,7 +2857,7 @@ async function loadHistorie(period, btn) {
         }
         renderHistorieChart(data);
     } catch (e) {
-        console.error('Historie laden fehlgeschlagen:', e);
+        console.error('History load failed:', e);
     } finally {
         if (loadingEl) loadingEl.style.display = 'none';
         if (canvasEl) canvasEl.style.opacity = '1';
@@ -2785,7 +2997,7 @@ function renderHistorieChart(data) {
                     ticks: {
                         color: '#64748b',
                         font: { family: 'Inter', size: 10 },
-                        callback: v => formatCurrency(v),
+                        callback: v => formatBaseCurrency(v),
                     }
                 },
                 pnl: {
@@ -2798,7 +3010,7 @@ function renderHistorieChart(data) {
                         font: { family: 'Inter', size: 10 },
                         callback: v => {
                             if (v === 0) return '0';
-                            return (v >= 0 ? '+' : '') + formatCurrency(v);
+                            return (v >= 0 ? '+' : '') + formatBaseCurrency(v);
                         },
                         maxTicksLimit: 6,
                     },
@@ -2830,7 +3042,7 @@ function renderHistorieChart(data) {
                         label: (ctx) => {
                             const val = ctx.raw;
                             if (val == null || val === 0) return null;
-                            return `${ctx.dataset.label}: ${formatCurrency(val)}`;
+                            return `${ctx.dataset.label}: ${formatBaseCurrency(val)}`;
                         },
                         afterBody: (items) => {
                             if (!items.length) return '';
@@ -2840,7 +3052,7 @@ function renderHistorieChart(data) {
                             const pnl = totalVal - costVal;
                             const pnlPct = costVal > 0 ? (pnl / costVal * 100) : 0;
                             const sign = pnl >= 0 ? '+' : '';
-                            return `\n━━━━━━━━━━━━━━━━\nGesamt: ${formatCurrency(totalVal)}\nEinstand: ${formatCurrency(costVal)}\nP&L: ${sign}${formatCurrency(pnl)} (${sign}${pnlPct.toFixed(1)}%)`;
+                            return `\n━━━━━━━━━━━━━━━━\n${isZh() ? '总额' : 'Total'}: ${formatBaseCurrency(totalVal)}\n${isZh() ? '成本' : 'Cost'}: ${formatBaseCurrency(costVal)}\nP&L: ${sign}${formatBaseCurrency(pnl)} (${sign}${pnlPct.toFixed(1)}%)`;
                         }
                     }
                 }
@@ -2873,7 +3085,7 @@ function _renderHistorieLegend(tickers, stocks, total) {
             <div class="historie-legend-item">
                 <span class="historie-legend-dot" style="background:${color}"></span>
                 <span class="historie-legend-ticker">${ticker}</span>
-                <span class="historie-legend-value">${formatCurrency(lastVal)} (${pct.toFixed(1)}%)</span>
+                <span class="historie-legend-value">${formatBaseCurrency(lastVal)} (${pct.toFixed(1)}%)</span>
             </div>
         `;
     }).join('');
@@ -2920,15 +3132,15 @@ function _renderHistorieSummary(dates, total, totalCost) {
             </div>
             <div class="historie-summary-item">
                 <span class="historie-summary-label">${isZh() ? '区间收益' : 'Performance (Period)'}</span>
-                <span class="historie-summary-value ${changeClass}">${sign}${formatCurrency(change)} (${sign}${changePct.toFixed(1)}%)</span>
+                <span class="historie-summary-value ${changeClass}">${sign}${formatBaseCurrency(change)} (${sign}${changePct.toFixed(1)}%)</span>
             </div>
             <div class="historie-summary-item">
                 <span class="historie-summary-label">${isZh() ? '当前市值' : 'Current Value'}</span>
-                <span class="historie-summary-value">${formatCurrency(lastVal)}</span>
+                <span class="historie-summary-value">${formatBaseCurrency(lastVal)}</span>
             </div>
             <div class="historie-summary-item">
                 <span class="historie-summary-label">${isZh() ? '总盈亏' : 'Total P&L'}${_performanceData ? ' (Parqet)' : ''}</span>
-                <span class="historie-summary-value ${pnlClass}">${pnlSign}${formatCurrency(totalPnl)} (${pnlSign}${totalPnlPct.toFixed(1)}%)</span>
+                <span class="historie-summary-value ${pnlClass}">${pnlSign}${formatBaseCurrency(totalPnl)} (${pnlSign}${totalPnlPct.toFixed(1)}%)</span>
             </div>
         </div>
     `;
@@ -2947,7 +3159,7 @@ function _renderTickerFilter(tickers, stocks) {
     }
 
     const showAll = _historieFilteredTickers.size === 0;
-    let html = `<button class="ticker-chip ${showAll ? 'active' : ''}" onclick="toggleTickerFilter('__ALL__', this)">Alle</button>`;
+    let html = `<button class="ticker-chip ${showAll ? 'active' : ''}" onclick="toggleTickerFilter('__ALL__', this)">${isZh() ? '全部' : 'All'}</button>`;
     tickers.forEach((ticker, i) => {
         const color = HISTORIE_COLORS[i % HISTORIE_COLORS.length];
         const active = showAll || _historieFilteredTickers.has(ticker);
@@ -3027,12 +3239,12 @@ function toggleTheme() {
     if (body.classList.contains('light-mode')) {
         body.classList.remove('light-mode');
         body.classList.add('dark-mode');
-        if (btn) btn.innerHTML = '<i data-lucide="moon"></i>';
+        if (btn) btn.innerHTML = '<i data-lucide="sun"></i>';
         localStorage.setItem('theme', 'dark');
     } else {
         body.classList.add('light-mode');
         body.classList.remove('dark-mode');
-        if (btn) btn.innerHTML = '<i data-lucide="sun"></i>';
+        if (btn) btn.innerHTML = '<i data-lucide="moon"></i>';
         localStorage.setItem('theme', 'light');
     }
     if (window.lucide) lucide.createIcons();
@@ -3041,12 +3253,19 @@ function toggleTheme() {
 // Apply saved theme on load
 (function applyTheme() {
     const saved = localStorage.getItem('theme');
-    if (saved === 'light') {
-        document.body.classList.add('light-mode');
-    } else if (saved === 'dark') {
+    const btn = document.getElementById('themeToggle');
+
+    if (saved === 'dark') {
         document.body.classList.add('dark-mode');
+        document.body.classList.remove('light-mode');
+        if (btn) btn.innerHTML = '<i data-lucide="sun"></i>';
+    } else {
+        document.body.classList.add('light-mode');
+        document.body.classList.remove('dark-mode');
+        if (btn) btn.innerHTML = '<i data-lucide="moon"></i>';
     }
-    // Otherwise let prefers-color-scheme CSS handle it
+
+    if (window.lucide) lucide.createIcons();
 })();
 
 // ==================== Animated Tab Indicator ====================
@@ -3225,7 +3444,7 @@ function handleCsvFile(event) {
         const text = e.target.result;
         const lines = text.trim().split('\n');
         if (lines.length < 2) {
-            showToast(t('csvError') + ': Empty file', 'error');
+            showToast(t('csvError') + ': ' + (isZh() ? '文件为空' : 'Empty file'), 'error');
             return;
         }
 
@@ -3247,7 +3466,7 @@ function handleCsvFile(event) {
         preview.innerHTML = `
             <table class="portfolio-table" style="font-size:0.8rem;">
                 <thead><tr>
-                    <th>Ticker</th><th>Shares</th><th>Buy Price</th><th>Currency</th>
+                    <th>${isZh() ? '代码' : 'Ticker'}</th><th>${isZh() ? '份额' : 'Shares'}</th><th>${isZh() ? '买入价' : 'Buy Price'}</th><th>${isZh() ? '货币' : 'Currency'}</th>
                 </tr></thead>
                 <tbody>
                     ${rows.slice(0, 10).map(r => `
@@ -3255,10 +3474,10 @@ function handleCsvFile(event) {
                             <td><strong>${r.ticker || ''}</strong></td>
                             <td>${r.shares || ''}</td>
                             <td>${r.buy_price || ''}</td>
-                            <td>${r.currency || 'USD'}</td>
+                            <td>${visibleCurrencyCode(r.currency)}</td>
                         </tr>
                     `).join('')}
-                    ${rows.length > 10 ? `<tr><td colspan="4" style="text-align:center;color:var(--text-muted)">... +${rows.length - 10} more</td></tr>` : ''}
+                    ${rows.length > 10 ? `<tr><td colspan="4" style="text-align:center;color:var(--text-muted)">... +${rows.length - 10} ${isZh() ? '条' : 'more'}</td></tr>` : ''}
                 </tbody>
             </table>
         `;
@@ -3293,6 +3512,169 @@ async function importCsvPortfolio() {
     } finally {
         btn.disabled = false;
         btn.textContent = t('uploadCsv');
+    }
+}
+
+// ==================== Holdings Manager ====================
+let managedHoldings = [];
+
+function showHoldingsManager() {
+    document.getElementById('holdingsManagerOverlay').style.display = 'block';
+    document.getElementById('holdingsManagerModal').style.display = 'block';
+    const menu = document.getElementById('actionMenu');
+    if (menu) {
+        menu.classList.remove('open');
+        menu.classList.remove('show');
+    }
+    resetHoldingForm();
+    loadManagedHoldings();
+    if (window.lucide) lucide.createIcons();
+}
+
+function closeHoldingsManager() {
+    document.getElementById('holdingsManagerOverlay').style.display = 'none';
+    document.getElementById('holdingsManagerModal').style.display = 'none';
+}
+
+async function loadManagedHoldings() {
+    const body = document.getElementById('holdingsManagerBody');
+    if (body) body.innerHTML = `<tr><td colspan="7">${isZh() ? '加载中...' : 'Loading...'}</td></tr>`;
+
+    try {
+        const res = await fetch('/api/portfolio/csv-positions');
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        managedHoldings = data.positions || [];
+        renderManagedHoldings();
+    } catch (err) {
+        if (body) body.innerHTML = `<tr><td colspan="7">${isZh() ? '读取持仓失败' : 'Could not load holdings'}</td></tr>`;
+        showToast(`${isZh() ? '读取持仓失败' : 'Could not load holdings'}: ${err.message}`, 'error');
+    }
+}
+
+function renderManagedHoldings() {
+    const body = document.getElementById('holdingsManagerBody');
+    if (!body) return;
+
+    if (!managedHoldings.length) {
+        body.innerHTML = `<tr><td colspan="7">${isZh() ? '还没有本地持仓，先新增一条。' : 'No local holdings yet. Add one above.'}</td></tr>`;
+        return;
+    }
+
+    body.innerHTML = managedHoldings.map(pos => `
+        <tr>
+            <td><strong>${_escapeHtml(pos.ticker || '')}</strong><br><small>${_escapeHtml(pos.name || '')}</small></td>
+            <td>${formatLocalizedNumber(pos.shares, 4)}</td>
+            <td>${formatLocalizedNumber(pos.buy_price, 4)}</td>
+            <td>${pos.current_price != null ? formatLocalizedNumber(pos.current_price, 4) : '–'}</td>
+            <td>${_escapeHtml(visibleCurrencyCode(pos.currency))}</td>
+            <td>${_escapeHtml(pos.asset_type || '')}</td>
+            <td>
+                <div class="holding-row-actions">
+                    <button class="holding-icon-btn" onclick="editManagedHolding('${encodeURIComponent(pos.ticker || '')}')">${isZh() ? '编辑' : 'Edit'}</button>
+                    <button class="holding-icon-btn danger" onclick="deleteManagedHolding('${encodeURIComponent(pos.ticker || '')}')">${isZh() ? '删除' : 'Delete'}</button>
+                </div>
+            </td>
+        </tr>
+    `).join('');
+}
+
+function resetHoldingForm() {
+    const form = document.getElementById('holdingForm');
+    if (form) form.reset();
+    document.getElementById('holdingOriginalTicker').value = '';
+    document.getElementById('holdingCurrency').value = 'USD';
+    document.getElementById('holdingAssetType').value = 'equity';
+    document.getElementById('holdingSaveBtn').textContent = isZh() ? '保存持仓' : 'Save Holding';
+}
+
+function editManagedHolding(encodedTicker) {
+    const ticker = decodeURIComponent(encodedTicker);
+    const pos = managedHoldings.find(p => (p.ticker || '').toUpperCase() === ticker.toUpperCase());
+    if (!pos) return;
+
+    document.getElementById('holdingOriginalTicker').value = pos.ticker || '';
+    document.getElementById('holdingTicker').value = pos.ticker || '';
+    document.getElementById('holdingShares').value = pos.shares ?? '';
+    document.getElementById('holdingBuyPrice').value = pos.buy_price ?? '';
+    document.getElementById('holdingCurrentPrice').value = pos.current_price ?? '';
+    document.getElementById('holdingBuyDate').value = pos.buy_date || '';
+    document.getElementById('holdingCurrency').value = visibleCurrencyCode(pos.currency);
+    document.getElementById('holdingAssetType').value = pos.asset_type || 'equity';
+    document.getElementById('holdingMarket').value = pos.market || '';
+    document.getElementById('holdingSector').value = pos.sector || '';
+    document.getElementById('holdingName').value = pos.name || '';
+    document.getElementById('holdingSaveBtn').textContent = isZh() ? '更新持仓' : 'Update Holding';
+}
+
+function getHoldingFormPayload() {
+    return {
+        ticker: document.getElementById('holdingTicker').value.trim(),
+        shares: document.getElementById('holdingShares').value,
+        buy_price: document.getElementById('holdingBuyPrice').value,
+        current_price: document.getElementById('holdingCurrentPrice').value,
+        buy_date: document.getElementById('holdingBuyDate').value,
+        currency: document.getElementById('holdingCurrency').value,
+        asset_type: document.getElementById('holdingAssetType').value,
+        market: document.getElementById('holdingMarket').value.trim(),
+        sector: document.getElementById('holdingSector').value.trim(),
+        name: document.getElementById('holdingName').value.trim(),
+    };
+}
+
+async function saveManagedPosition(event) {
+    event.preventDefault();
+
+    const originalTicker = document.getElementById('holdingOriginalTicker').value.trim();
+    const payload = getHoldingFormPayload();
+    const btn = document.getElementById('holdingSaveBtn');
+    const method = originalTicker ? 'PUT' : 'POST';
+    const url = originalTicker
+        ? `/api/portfolio/csv-positions/${encodeURIComponent(originalTicker)}`
+        : '/api/portfolio/csv-positions';
+
+    btn.disabled = true;
+    btn.textContent = isZh() ? '保存中...' : 'Saving...';
+
+    try {
+        const res = await fetch(url, {
+            method,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ position: payload }),
+        });
+        const result = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(result.error || `HTTP ${res.status}`);
+
+        showToast(isZh() ? '持仓已保存' : 'Holding saved', 'success');
+        resetHoldingForm();
+        await loadManagedHoldings();
+        loadPortfolio();
+    } catch (err) {
+        showToast(`${isZh() ? '保存失败' : 'Save failed'}: ${err.message}`, 'error');
+    } finally {
+        btn.disabled = false;
+        btn.textContent = originalTicker ? (isZh() ? '更新持仓' : 'Update Holding') : (isZh() ? '保存持仓' : 'Save Holding');
+    }
+}
+
+async function deleteManagedHolding(encodedTicker) {
+    const ticker = decodeURIComponent(encodedTicker);
+    const ok = confirm(isZh() ? `删除 ${ticker}？` : `Delete ${ticker}?`);
+    if (!ok) return;
+
+    try {
+        const res = await fetch(`/api/portfolio/csv-positions/${encodeURIComponent(ticker)}`, {
+            method: 'DELETE',
+        });
+        const result = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(result.error || `HTTP ${res.status}`);
+
+        showToast(isZh() ? '持仓已删除' : 'Holding deleted', 'success');
+        resetHoldingForm();
+        await loadManagedHoldings();
+        loadPortfolio();
+    } catch (err) {
+        showToast(`${isZh() ? '删除失败' : 'Delete failed'}: ${err.message}`, 'error');
     }
 }
 
@@ -3333,7 +3715,7 @@ async function loadShadowPortfolio() {
 function renderShadowKpis(data) {
     // Total Value
     const tvEl = document.getElementById('shadowTotalValue');
-    if (tvEl) tvEl.textContent = formatCurrency(data.total_value_eur || 0);
+    if (tvEl) tvEl.textContent = formatBaseCurrency(data.total_value_eur || 0);
 
     // P&L
     const pnlEl = document.getElementById('shadowPnl');
@@ -3341,7 +3723,7 @@ function renderShadowKpis(data) {
     if (pnlEl) {
         const pnl = data.pnl_eur || 0;
         const sign = pnl >= 0 ? '+' : '';
-        pnlEl.textContent = `${sign}${formatCurrency(pnl)}`;
+        pnlEl.textContent = `${sign}${formatBaseCurrency(pnl)}`;
         pnlEl.className = `shadow-kpi-value ${pnl >= 0 ? 'positive' : 'negative'}`;
     }
     if (pnlPctEl) {
@@ -3353,8 +3735,10 @@ function renderShadowKpis(data) {
     // Cash
     const cashEl = document.getElementById('shadowCash');
     const cashPctEl = document.getElementById('shadowCashPct');
-    if (cashEl) cashEl.textContent = formatCurrency(data.cash_eur || 0);
-    if (cashPctEl) cashPctEl.textContent = `${(data.cash_pct || 0).toFixed(1)}% des Portfolios`;
+    if (cashEl) cashEl.textContent = formatBaseCurrency(data.cash_eur || 0);
+    if (cashPctEl) cashPctEl.textContent = isZh()
+        ? `占组合 ${(data.cash_pct || 0).toFixed(1)}%`
+        : `${(data.cash_pct || 0).toFixed(1)}% of portfolio`;
 
     // Positions
     const posEl = document.getElementById('shadowPositions');
@@ -3391,8 +3775,8 @@ function renderShadowPositions(positions) {
                     </div>
                 </td>
                 <td>${p.shares.toFixed(4)}</td>
-                <td class="price-cell">${formatCurrency(p.current_price_eur)}</td>
-                <td class="price-cell"><strong>${formatCurrency(p.value_eur)}</strong></td>
+                <td class="price-cell">${formatBaseCurrency(p.current_price_eur)}</td>
+                <td class="price-cell"><strong>${formatBaseCurrency(p.value_eur)}</strong></td>
                 <td>
                     <div class="score-bar">
                         <div class="score-bar-track">
@@ -3402,7 +3786,7 @@ function renderShadowPositions(positions) {
                     </div>
                 </td>
                 <td class="${pnlClass}">
-                    ${pnlSign}${formatCurrency(p.pnl_eur)}<br>
+                    ${pnlSign}${formatBaseCurrency(p.pnl_eur)}<br>
                     <small>${pnlSign}${p.pnl_pct.toFixed(2)}%</small>
                 </td>
                 <td><small style="color:var(--text-muted)">${p.sector || '–'}</small></td>
@@ -3482,7 +3866,7 @@ async function loadShadowPerformanceChart(days, btn) {
         const datasets = [];
         if (hasShadowData) {
             datasets.push({
-                label: '🤖 Shadow Agent',
+                label: isZh() ? '🤖 影子代理' : '🤖 Shadow Agent',
                 data: shadowPoints,
                 borderColor: '#a855f7',
                 backgroundColor: 'rgba(168, 85, 247, 0.08)',
@@ -3496,7 +3880,7 @@ async function loadShadowPerformanceChart(days, btn) {
         }
         if (hasRealData) {
             datasets.push({
-                label: '📊 Echtes Portfolio',
+                label: isZh() ? '📊 真实组合' : '📊 Real Portfolio',
                 data: realPoints,
                 borderColor: '#06b6d4',
                 backgroundColor: 'rgba(6, 182, 212, 0.05)',
@@ -3611,10 +3995,10 @@ async function loadShadowTransactions() {
                     <div style="flex:1">
                         <div style="display:flex;justify-content:space-between;align-items:center">
                             <span class="shadow-tx-ticker">${tx.ticker}</span>
-                            <span class="shadow-tx-amount">${amountSign}${formatCurrency(tx.total_eur)}</span>
+                            <span class="shadow-tx-amount">${amountSign}${formatBaseCurrency(tx.total_eur)}</span>
                         </div>
                         <div class="shadow-tx-details">
-                            ${tx.shares.toFixed(4)} ${isZh() ? '股' : 'sh'} @ ${formatCurrency(tx.price_eur)} · ${date}
+                            ${tx.shares.toFixed(4)} ${isZh() ? '股' : 'sh'} @ ${formatBaseCurrency(tx.price_eur)} · ${date}
                         </div>
                         ${tx.reason ? `<div class="shadow-tx-reason">💬 ${tx.reason}</div>` : ''}
                     </div>
@@ -3754,8 +4138,10 @@ function updateSliderValue(sliderId, valueId, prefix, suffix) {
     const max = parseFloat(slider.max);
     const pct = ((val - min) / (max - min)) * 100;
 
-    // Update display
-    valueEl.textContent = `${prefix}${val}${suffix}`;
+    // Update display. Shadow rules are stored in EUR internally; show trade volume in USD/CNY.
+    valueEl.textContent = sliderId === 'cfgMinTrade'
+        ? formatBaseCurrency(val)
+        : `${prefix}${val}${suffix}`;
 
     // Update slider gradient fill via CSS variable
     slider.style.setProperty('--slider-pct', `${pct}%`);
@@ -3803,7 +4189,7 @@ function _applyShadowConfigToUI(config) {
         ['cfgMaxPositions', 'valMaxPositions', config.max_positions, '', ''],
         ['cfgMaxWeight',    'valMaxWeight',    config.max_weight_pct, '', '%'],
         ['cfgMinCash',      'valMinCash',      config.min_cash_pct, '', '%'],
-        ['cfgMinTrade',     'valMinTrade',     config.min_trade_eur, '€ ', ''],
+        ['cfgMinTrade',     'valMinTrade',     config.min_trade_eur, '', ''],
         ['cfgMaxTrades',    'valMaxTrades',    config.max_trades_per_cycle, '', ''],
         ['cfgMaxSector',    'valMaxSector',    config.max_sector_pct, '', '%'],
         ['cfgMinScore',     'valMinScore',     config.min_buy_score, '', '/100'],

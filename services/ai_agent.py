@@ -18,6 +18,7 @@ from models import (
     Rating,
     StockFullData,
 )
+from services.display_currency import format_display_money
 
 logger = logging.getLogger(__name__)
 
@@ -92,22 +93,22 @@ def _build_telegram_report(
 
     # ── Portfolio Overview ──
     sections.append("💰 *Portfolio Übersicht*")
-    sections.append(f"  Gesamtwert: {summary.total_value:,.2f} EUR")
-    sections.append(f"  Gesamtkosten: {summary.total_cost:,.2f} EUR")
+    sections.append(f"  Gesamtwert: {format_display_money(summary.total_value, summary)}")
+    sections.append(f"  Gesamtkosten: {format_display_money(summary.total_cost, summary)}")
 
     pnl_emoji = "📈" if summary.total_pnl >= 0 else "📉"
-    sections.append(f"  {pnl_emoji} P&L: {summary.total_pnl:+,.2f} EUR ({summary.total_pnl_percent:+.1f}%)")
+    sections.append(f"  {pnl_emoji} P&L: {format_display_money(summary.total_pnl, summary, signed=True)} ({summary.total_pnl_percent:+.1f}%)")
 
     if summary.daily_total_change != 0:
         day_emoji = "🟢" if summary.daily_total_change >= 0 else "🔴"
-        sections.append(f"  {day_emoji} Heute: {summary.daily_total_change:+,.2f} EUR ({summary.daily_total_change_pct:+.1f}%)")
+        sections.append(f"  {day_emoji} Heute: {format_display_money(summary.daily_total_change, summary, signed=True)} ({summary.daily_total_change_pct:+.1f}%)")
 
     sections.append(f"  Positionen: {summary.num_positions}")
 
     # Cash-Bestand
     cash_stock = next((s for s in summary.stocks if s.position.ticker == "CASH"), None)
     if cash_stock:
-        sections.append(f"  💵 Cash: {cash_stock.position.current_price:,.2f} EUR")
+        sections.append(f"  💵 Cash: {format_display_money(cash_stock.position.current_price, summary)}")
 
     # Fear & Greed
     if summary.fear_greed:
@@ -171,7 +172,7 @@ def _build_telegram_report(
             day_str = "—"
         sections.append(
             f"  {day_emoji} {stock.position.ticker}: {day_str}"
-            f"  ({stock.position.current_price:,.2f} EUR)"
+            f"  ({format_display_money(stock.position.current_price, summary)})"
         )
     sections.append("")
 
@@ -227,8 +228,8 @@ async def _run_gemini_research(
         "Du bist ein professioneller Finanzanalyst. Analysiere folgendes Portfolio und gib kurze, "
         "prägnante Insights auf Deutsch. Maximal 800 Zeichen.",
         "",
-        f"Portfolio-Wert: {summary.total_value:,.0f} EUR",
-        f"P&L: {summary.total_pnl:+,.0f} EUR ({summary.total_pnl_percent:+.1f}%)",
+        f"Portfolio-Wert: {format_display_money(summary.total_value, summary, digits=0)}",
+        f"P&L: {format_display_money(summary.total_pnl, summary, digits=0, signed=True)} ({summary.total_pnl_percent:+.1f}%)",
         f"Positionen: {summary.num_positions}",
     ]
 

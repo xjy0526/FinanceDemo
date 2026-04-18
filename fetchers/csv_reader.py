@@ -7,11 +7,78 @@ Expected CSV columns: ticker, shares, buy_price, buy_date (optional), currency (
 
 import csv
 import os
+from pathlib import Path
 from datetime import datetime
 from typing import Optional
 import logging
 
 logger = logging.getLogger("financebro.csv_reader")
+
+CSV_FIELDS = [
+    "ticker",
+    "shares",
+    "buy_price",
+    "current_price",
+    "buy_date",
+    "currency",
+    "sector",
+    "name",
+    "asset_type",
+    "market",
+    "exchange",
+    "country",
+]
+
+
+def resolve_csv_path(file_path: str | Path | None = None) -> Path:
+    """Resolve the configured portfolio CSV path relative to the project root."""
+    if file_path is None:
+        from config import BASE_DIR, settings
+
+        file_path = settings.PARQET_PORTFOLIO_CSV
+        base_dir = BASE_DIR
+    else:
+        from config import BASE_DIR
+
+        base_dir = BASE_DIR
+
+    path = Path(file_path).expanduser()
+    if not path.is_absolute():
+        path = base_dir / path
+    return path
+
+
+def saved_csv_portfolio_exists(file_path: str | Path | None = None) -> bool:
+    """Return True when a persisted CSV portfolio is available."""
+    return resolve_csv_path(file_path).is_file()
+
+
+def save_csv_positions(positions: list[dict], file_path: str | Path | None = None) -> Path:
+    """Persist normalized CSV positions so they survive app restarts."""
+    path = resolve_csv_path(file_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    with open(path, "w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=CSV_FIELDS)
+        writer.writeheader()
+        for pos in positions:
+            writer.writerow({
+                "ticker": pos.get("ticker", ""),
+                "shares": pos.get("shares", ""),
+                "buy_price": pos.get("buy_price", ""),
+                "current_price": pos.get("current_price") if pos.get("current_price") is not None else "",
+                "buy_date": pos.get("buy_date") or "",
+                "currency": pos.get("currency", ""),
+                "sector": pos.get("sector") or "",
+                "name": pos.get("name", ""),
+                "asset_type": pos.get("asset_type", ""),
+                "market": pos.get("market", ""),
+                "exchange": pos.get("exchange", ""),
+                "country": pos.get("country", ""),
+            })
+
+    logger.info("Persisted %s CSV positions to %s", len(positions), path)
+    return path
 
 
 def _normalize_asset_type(raw_value: str, ticker: str, market: str) -> str:
@@ -76,6 +143,59 @@ def parse_csv_file(file_path: str) -> list[dict]:
 def parse_csv_json(positions: list[dict]) -> list[dict]:
     """Parse uploaded JSON positions (from frontend CSV upload)."""
     return _normalize_rows(positions)
+
+
+def load_saved_csv_positions(file_path: str | Path | None = None) -> list[dict]:
+    """Load normalized positions from the persisted portfolio CSV."""
+    return parse_csv_file(str(resolve_csv_path(file_path)))
+
+
+def upsert_csv_position(
+    position: dict,
+    file_path: str | Path | None = None,
+    original_ticker: str | None = None,
+) -> tuple[list[dict], dict, bool]:
+    """Create or update one position in the persisted CSV portfolio."""
+    normalized = parse_csv_json([position])
+    if not normalized:
+        raise ValueError("Invalid position")
+
+    new_position = normalized[0]
+    path = resolve_csv_path(file_path)
+    positions = parse_csv_file(str(path)) if path.exists() else []
+    original_key = (original_ticker or new_position["ticker"]).upper()
+    new_key = new_position["ticker"].upper()
+    replaced = False
+    updated_positions = []
+
+    for existing in positions:
+        key = existing.get("ticker", "").upper()
+        if key in {original_key, new_key}:
+            replaced = True
+            continue
+        updated_positions.append(existing)
+
+    updated_positions.append(new_position)
+    save_csv_positions(updated_positions, path)
+    return updated_positions, new_position, replaced
+
+
+def delete_csv_position(
+    ticker: str,
+    file_path: str | Path | None = None,
+) -> tuple[list[dict], bool]:
+    """Delete one position from the persisted CSV portfolio."""
+    path = resolve_csv_path(file_path)
+    positions = parse_csv_file(str(path)) if path.exists() else []
+    ticker_key = (ticker or "").upper()
+    updated_positions = [
+        pos for pos in positions
+        if pos.get("ticker", "").upper() != ticker_key
+    ]
+    deleted = len(updated_positions) != len(positions)
+    if deleted:
+        save_csv_positions(updated_positions, path)
+    return updated_positions, deleted
 
 
 def _normalize_rows(rows: list[dict]) -> list[dict]:

@@ -12,6 +12,7 @@ import logging
 from datetime import datetime, timedelta
 
 from config import settings
+from services.display_currency import format_display_money
 
 logger = logging.getLogger(__name__)
 
@@ -121,9 +122,9 @@ async def _generate_ai_summary(digest_data: dict) -> str:
         prompt = (
             "Du bist ein professioneller Finanzanalyst. Erstelle eine Wochenzusammenfassung "
             "(5-6 Sätze, max 800 Zeichen) auf Deutsch für folgendes Portfolio:\n\n"
-            f"Portfoliowert: {digest_data['total_value']:,.0f} EUR\n"
-            f"Einstandskosten: {digest_data.get('total_cost', 0):,.0f} EUR\n"
-            f"Gesamt-P&L: {digest_data['total_pnl']:+,.0f} EUR ({digest_data['total_pnl_pct']:+.1f}%)\n"
+            f"Portfoliowert: {format_display_money(digest_data['total_value'], digest_data.get('summary'), digits=0)}\n"
+            f"Einstandskosten: {format_display_money(digest_data.get('total_cost', 0), digest_data.get('summary'), digits=0)}\n"
+            f"Gesamt-P&L: {format_display_money(digest_data['total_pnl'], digest_data.get('summary'), digits=0, signed=True)} ({digest_data['total_pnl_pct']:+.1f}%)\n"
         )
         if digest_data["best_performer"]:
             prompt += f"Bester: {digest_data['best_performer']['ticker']} ({digest_data['best_performer']['pnl_pct']:+.1f}%)\n"
@@ -160,9 +161,9 @@ def _format_digest(data: dict, ai_summary: str) -> str:
     lines = [
         "📊 *FinanceBro Wochen-Digest*",
         f"_{datetime.now().strftime('%d.%m.%Y')}_\n",
-        f"💰 Portfoliowert: {data['total_value']:,.2f} EUR",
-        f"💵 Einstandskosten: {data.get('total_cost', 0):,.2f} EUR",
-        f"📈 Gesamt-P&L: {data['total_pnl']:+,.2f} EUR ({data['total_pnl_pct']:+.1f}%)",
+        f"💰 Portfoliowert: {format_display_money(data['total_value'], data.get('summary'))}",
+        f"💵 Einstandskosten: {format_display_money(data.get('total_cost', 0), data.get('summary'))}",
+        f"📈 Gesamt-P&L: {format_display_money(data['total_pnl'], data.get('summary'), signed=True)} ({data['total_pnl_pct']:+.1f}%)",
         f"📋 Positionen: {data['num_positions']}",
     ]
 
@@ -200,7 +201,7 @@ def _format_digest(data: dict, ai_summary: str) -> str:
                 lines.append("\n🏢 *P&L nach Sektor*")
                 for s in attr["sectors"][:5]:
                     emoji = "🟢" if s["pnl_eur"] >= 0 else "🔴"
-                    lines.append(f"  {emoji} {s['sector']}: {s['pnl_eur']:+,.0f} EUR")
+                    lines.append(f"  {emoji} {s['sector']}: {format_display_money(s['pnl_eur'], summary, digits=0, signed=True)}")
                 conc = attr["concentration"]
                 lines.append(
                     f"  🎯 Konzentration: {conc['risk_level']} "
@@ -236,9 +237,9 @@ def _format_digest(data: dict, ai_summary: str) -> str:
         if actions_buy or actions_sell:
             lines.append("\n💡 *Rebalancing Empfehlung*")
             for a in actions_buy[:3]:
-                lines.append(f"  🟢 {a.ticker}: +{a.amount_eur:.0f} EUR ({a.shares_delta:+.2f} Stk)")
+                lines.append(f"  🟢 {a.ticker}: {format_display_money(a.amount_eur, summary, digits=0, signed=True)} ({a.shares_delta:+.2f} Stk)")
             for a in actions_sell[:3]:
-                lines.append(f"  🔴 {a.ticker}: {a.amount_eur:.0f} EUR ({a.shares_delta:+.2f} Stk)")
+                lines.append(f"  🔴 {a.ticker}: {format_display_money(a.amount_eur, summary, digits=0)} ({a.shares_delta:+.2f} Stk)")
 
     # ── KI-Einschätzung ──
     if ai_summary:
@@ -249,4 +250,3 @@ def _format_digest(data: dict, ai_summary: str) -> str:
     lines.append("_FinanceBro Weekly Digest • Freitag 22:30_")
 
     return "\n".join(lines)
-

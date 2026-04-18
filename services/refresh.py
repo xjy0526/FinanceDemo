@@ -29,6 +29,7 @@ from fetchers.yfinance_data import fetch_yfinance_data, quick_price_update
 from fetchers.fear_greed import fetch_fear_greed_index
 from fetchers.currency import fetch_eur_usd_rate, fetch_eur_dkk_rate
 from services.currency_converter import CurrencyConverter
+from services.display_currency import format_display_money
 from engine.scorer import calculate_score
 from engine.rebalancer import calculate_rebalancing
 from database import save_snapshot
@@ -87,19 +88,33 @@ async def _do_refresh():
         _set_progress("Lade Wechselkurse...", 5)
         converter = await CurrencyConverter.create()
         eur_usd_rate = converter.rates.eur_usd
+        eur_cny_rate = converter.rates.eur_cny
 
         # --- 1. Lade Portfolio (bevorzugt aus bestehendem Parqet-Update) ---
         _set_progress("Lade Portfolio...", 10)
         existing_summary = portfolio_data.get("summary")
+        using_saved_csv = False
         if existing_summary and existing_summary.stocks:
             # Positionen aus dem letzten Parqet-Update wiederverwenden (spart API-Calls)
             positions = [s.position for s in existing_summary.stocks]
             logger.info(f"Verwende {len(positions)} bestehende Positionen (bereits geladen)")
         else:
-            positions = await fetch_portfolio()
+            from fetchers.csv_reader import saved_csv_portfolio_exists
+            if saved_csv_portfolio_exists():
+                using_saved_csv = True
+                from services.portfolio_builder import update_saved_csv_portfolio
+                await update_saved_csv_portfolio()
+                existing_summary = portfolio_data.get("summary")
+                positions = [s.position for s in existing_summary.stocks] if existing_summary else []
+                logger.info(f"Verwende {len(positions)} Positionen aus lokaler CSV")
+            else:
+                positions = await fetch_portfolio()
 
         is_demo = False
         if not positions:
+            if using_saved_csv:
+                logger.info("Lokale CSV enthält keine Positionen - Refresh beendet")
+                return
             if settings.ENVIRONMENT == "production":
                 # Production: NIEMALS Demo-Daten laden!
                 # Stattdessen existierende Daten behalten oder leeres Portfolio
@@ -279,6 +294,7 @@ async def _do_refresh():
             fear_greed=fear_greed_data,
             is_demo=is_demo,
             eur_usd_rate=eur_usd_rate,
+            eur_cny_rate=eur_cny_rate,
             daily_total_change=t["daily_total_eur"],
             daily_total_change_pct=t["daily_total_pct"],
         )
@@ -314,7 +330,10 @@ async def _do_refresh():
             logger.warning(f"Snapshot-Speicherung fehlgeschlagen: {e}")
 
         _set_progress("Erstelle Analyse-Report...", 90)
-        logger.info(f"✅ Refresh abgeschlossen: {len(stocks)} Positionen, Wert: €{t['total_value']:,.2f}")
+        logger.info(
+            f"✅ Refresh abgeschlossen: {len(stocks)} Positionen, "
+            f"Wert: {format_display_money(t['total_value'], summary)}"
+        )
 
         # Analyse-Report generieren
         try:
@@ -498,7 +517,7 @@ async def _quick_price_refresh():
             f"⚡ Quick-Update: {updated}/{len(tickers)} Kurse aktualisiert "
             f"(yfinance-WS: {yf_ws_count}, yfinance-Batch: {yf_batch_count}), "
             f"{daily_updated} Daily Changes, "
-            f"Wert: €{t['total_value']:,.2f}"
+            f"Wert: {format_display_money(t['total_value'], summary)}"
         )
 
         # Save snapshot

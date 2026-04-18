@@ -117,7 +117,7 @@ class TestBuildTelegramReport:
 
         assert "FinanceBro Daily Report" in text
         assert "Portfolio Übersicht" in text
-        assert "4,100.00 EUR" in text or "4.100,00" in text
+        assert "$4,100.00 USD" in text
 
     def test_report_contains_all_positions(self, sample_summary, sample_report):
         from services.ai_agent import _build_telegram_report

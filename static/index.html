@@ -19,9 +19,6 @@
     <!-- Toast Notification Container -->
     <div class="toast-container" id="toastContainer"></div>
 
-    <!-- Demo Banner -->
-    <div class="demo-banner" id="demoBanner" data-i18n="demoBanner">🎭 Demo-Modus — Fiktive Daten zu Präsentationszwecken</div>
-
     <!-- Full Screen App Layout -->
     <div class="app-layout">
         
@@ -52,7 +49,7 @@
                     <i data-lucide="brain"></i> <span data-i18n="aiAdvisor">AI Advisor</span>
                 </button>
                 <button class="nav-btn" data-tab="shadow" onclick="switchTab('shadow')">
-                    <i data-lucide="bot"></i> <span>Shadow Agent</span>
+                    <i data-lucide="bot"></i> <span data-i18n="shadowAgent">Shadow Agent</span>
                 </button>
                 <div class="nav-indicator" id="tabIndicator"></div>
             </nav>
@@ -64,7 +61,6 @@
             <!-- App Header (Controls) -->
             <header class="app-header" id="header">
                 <div class="header-left">
-                    <span class="demo-badge" id="demoBadge" style="display:none;">DEMO</span>
                 </div>
                 <div class="header-right">
                     <span class="last-update" id="lastUpdate">–</span>
@@ -73,7 +69,7 @@
                     <button class="btn-theme" id="themeToggle" onclick="toggleTheme()"
                         data-i18n-title="toggleTheme" title="Farbschema wechseln"><i data-lucide="moon"></i></button>
                     <button class="btn-currency" id="currencyToggle" onclick="toggleCurrency()"
-                        data-i18n-title="toggleCurrency" title="Währung wechseln">EUR</button>
+                        data-i18n-title="toggleCurrency" title="Switch currency">USD</button>
                     
                     <div class="action-dropdown" id="actionDropdown">
                         <button class="action-dropdown-toggle" onclick="toggleActionMenu()">
@@ -82,6 +78,9 @@
                         <div class="action-dropdown-menu" id="actionMenu">
                             <button class="action-dropdown-item" id="btnUploadCsv" onclick="showCsvUpload()">
                                 <i data-lucide="upload"></i> <span data-i18n="uploadCsv">CSV Import</span>
+                            </button>
+                            <button class="action-dropdown-item" id="btnManageHoldings" onclick="showHoldingsManager()">
+                                <i data-lucide="list-plus"></i> <span data-i18n="manageHoldings">Manage Holdings</span>
                             </button>
                             <button class="action-dropdown-item" id="btnUpdateParqet" onclick="updateParqet()">
                                 <i data-lucide="refresh-cw"></i> <span data-i18n="updateParqet">Update Parqet</span>
@@ -92,10 +91,6 @@
                             <div class="action-dropdown-divider"></div>
                             <button class="action-dropdown-item" id="btnRefresh" onclick="refreshData()">
                                 <i data-lucide="microscope"></i> <span data-i18n="fullAnalysis">Komplette Analyse</span>
-                            </button>
-                            <div class="action-dropdown-divider"></div>
-                            <button class="action-dropdown-item" id="btnDemo" onclick="toggleDemo()">
-                                <i data-lucide="drama"></i> <span data-i18n="demoMode">Demo-Modus</span>
                             </button>
                         </div>
                     </div>
@@ -118,7 +113,7 @@
                 <div class="pnl-divider"></div>
                 <div class="portfolio-pnl daily-change" id="dailyChange">
                     <span class="pnl-label" data-i18n="today">Heute:</span>
-                    <span class="pnl-amount" id="dailyPnl">€0.00</span>
+                    <span class="pnl-amount" id="dailyPnl">$0.00</span>
                     <span class="pnl-percent" id="dailyPnlPct">(0.0%)</span>
                 </div>
             </div>
@@ -145,7 +140,7 @@
             <div class="ai-insight-card" id="aiInsightWidget" style="display:none;">
                 <div class="ai-insight-header">
                     <i data-lucide="sparkles"></i>
-                    <span class="ai-insight-title">AI Portfolio Insight</span>
+                    <span class="ai-insight-title" data-i18n="aiPortfolioInsight">AI Portfolio Insight</span>
                 </div>
                 <div class="ai-insight-text" id="aiInsightText"></div>
             </div>
@@ -155,7 +150,7 @@
                     <!-- Main Performance Chart (V2) -->
                     <div class="chart-card v2-performance-card performanceChartCard" style="margin-bottom: 1rem;">
                         <div class="chart-header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem;">
-                            <h3 class="chart-title" style="margin:0;">Portfolio Performance</h3>
+                            <h3 class="chart-title" style="margin:0;" data-i18n="portfolioPerformance">Portfolio Performance</h3>
                             <div class="filter-buttons">
                                 <button class="filter-btn" onclick="loadPerformanceChart(30, this)">1M</button>
                                 <button class="filter-btn active" onclick="loadPerformanceChart(90, this)">3M</button>
@@ -175,15 +170,15 @@
                             <span class="stat-value" id="statPositions">0</span>
                         </div>
                         <div class="stat-card stat-buy stagger-in">
-                            <span class="stat-label">🟢 Buy</span>
+                            <span class="stat-label" data-i18n="buyRating">🟢 Buy</span>
                             <span class="stat-value" id="statBuy">0</span>
                         </div>
                         <div class="stat-card stat-hold stagger-in">
-                            <span class="stat-label">🟡 Hold</span>
+                            <span class="stat-label" data-i18n="holdRating">🟡 Hold</span>
                             <span class="stat-value" id="statHold">0</span>
                         </div>
                         <div class="stat-card stat-sell stagger-in">
-                            <span class="stat-label">🔴 Sell</span>
+                            <span class="stat-label" data-i18n="sellRating">🔴 Sell</span>
                             <span class="stat-value" id="statSell">0</span>
                         </div>
                     </div>
@@ -234,9 +229,9 @@
                         </div>
                         <div class="filter-buttons">
                             <button class="filter-btn active" onclick="filterTable('all', this)" data-i18n="all">Alle</button>
-                            <button class="filter-btn" onclick="filterTable('buy', this)">Buy</button>
-                            <button class="filter-btn" onclick="filterTable('hold', this)">Hold</button>
-                            <button class="filter-btn" onclick="filterTable('sell', this)">Sell</button>
+                            <button class="filter-btn" onclick="filterTable('buy', this)" data-i18n="buy">Buy</button>
+                            <button class="filter-btn" onclick="filterTable('hold', this)" data-i18n="hold">Hold</button>
+                            <button class="filter-btn" onclick="filterTable('sell', this)" data-i18n="sell">Sell</button>
                         </div>
                     </div>
                 </div>
@@ -279,7 +274,7 @@
                 <!-- Portfolio Performance -->
                 <div class="chart-card analyse-wide performanceChartCard" style="width: 100%;">
                     <div class="chart-header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem;">
-                        <h3 class="chart-title" style="margin:0;">Portfolio Performance</h3>
+                        <h3 class="chart-title" style="margin:0;" data-i18n="portfolioPerformance">Portfolio Performance</h3>
                         <div class="filter-buttons">
                             <button class="filter-btn" onclick="loadPerformanceChart(30, this)">1M</button>
                             <button class="filter-btn active" onclick="loadPerformanceChart(90, this)">3M</button>
@@ -412,6 +407,9 @@
                     <button class="advisor-mode-btn active" id="advisorModeAnalyse" onclick="switchAdvisorMode('analyse')">
                         <i data-lucide="search"></i> <span data-i18n="tradeAnalysis">Trade-Analyse</span>
                     </button>
+                    <button class="advisor-mode-btn" id="advisorModeHoldings" onclick="switchAdvisorMode('holdings')">
+                        <i data-lucide="list-checks"></i> <span data-i18n="holdingRecommendations">持仓推荐</span>
+                    </button>
                     <button class="advisor-mode-btn" id="advisorModeChat" onclick="switchAdvisorMode('chat')">
                         <i data-lucide="message-circle"></i> <span data-i18n="chat">Chat</span>
                     </button>
@@ -441,7 +439,7 @@
                                     </div>
                                 </div>
                                 <div class="advisor-field">
-                                    <label for="advisorAmount" data-i18n="amountEur">Betrag (EUR)</label>
+                                    <label for="advisorAmount" data-currency-label="amount">Amount (USD)</label>
                                     <input type="number" id="advisorAmount" data-i18n="amountPlaceholder" placeholder="z.B. 2000" min="0" step="100">
                                 </div>
                             </div>
@@ -453,13 +451,31 @@
 
                             <button class="advisor-submit-btn" id="advisorSubmitBtn" onclick="submitAdvisorQuery()">
                                 <span class="advisor-btn-text"><i data-lucide="search"></i> <span data-i18n="startAnalysis">Analyse starten</span></span>
-                                <span class="advisor-btn-loading" style="display:none;" data-i18n="aiAnalyzing">⏳ AI analysiert...</span>
+                                <span class="advisor-btn-loading" style="display:none;" data-i18n="aiAnalyzing">⏳ AI analyzing...</span>
                             </button>
                         </div>
                     </div>
 
                     <!-- Result -->
                     <div class="advisor-result" id="advisorResult" style="display:none;"></div>
+                </div>
+
+                <!-- Mode: Holding Recommendations -->
+                <div class="advisor-mode-content" id="advisorHoldingsMode" style="display:none;">
+                    <div class="advisor-form-card holdings-ai-card">
+                        <div class="holdings-ai-header">
+                            <div>
+                                <h2 class="section-title" data-i18n="holdingRecommendationsTitle">🧭 持仓 AI 推荐</h2>
+                                <p class="advisor-subtitle" data-i18n="holdingRecommendationsSubtitle">基于当前持仓评分、权重、盈亏和风险集中度生成逐项建议</p>
+                            </div>
+                            <button class="advisor-submit-btn holdings-ai-refresh" id="holdingRecommendationsBtn" onclick="loadHoldingRecommendations(true)">
+                                <i data-lucide="sparkles"></i> <span data-i18n="generateHoldingRecommendations">生成推荐</span>
+                            </button>
+                        </div>
+                        <div class="holding-recommendations-result" id="holdingRecommendationsResult">
+                            <div class="advisor-loading-sub" data-i18n="holdingRecommendationsHint">点击生成后，AI 会逐项给出加仓、持有、降权或复核建议。</div>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- Mode: Chat -->
@@ -567,7 +583,7 @@
                                     <tr>
                                         <th data-i18n="shadowTableHeaderStock">Aktie</th>
                                         <th data-i18n="shadowTableHeaderShares">Stk.</th>
-                                        <th data-i18n="shadowTableHeaderPrice">Kurs (EUR)</th>
+                                        <th data-i18n="shadowTableHeaderPrice">Price</th>
                                         <th data-i18n="shadowTableHeaderValue">Wert</th>
                                         <th data-i18n="shadowTableHeaderWeight">Gewicht</th>
                                         <th data-i18n="shadowTableHeaderPnl">P&amp;L</th>
@@ -709,10 +725,10 @@
                                 <div class="shadow-config-control">
                                     <input type="range" class="shadow-slider" id="cfgMinTrade"
                                         min="100" max="5000" step="50" value="500"
-                                        oninput="updateSliderValue('cfgMinTrade', 'valMinTrade', '€ ', '')">
+                                        oninput="updateSliderValue('cfgMinTrade', 'valMinTrade', '', '')">
                                     <div class="shadow-slider-val">
-                                        <span id="valMinTrade">€ 500</span>
-                                        <small>EUR</small>
+                                        <span id="valMinTrade">$500</span>
+                                        <small data-currency-code>USD</small>
                                     </div>
                                 </div>
                             </div>
@@ -822,9 +838,8 @@
             <p class="csv-format-hint" data-i18n="csvFormatHint">Format: ticker, shares, buy_price, buy_date, currency (optional)</p>
             
             <div style="margin-top: 1rem; padding: 1rem; border-radius: var(--radius-sm); background: var(--bg-secondary); border: 1px dashed var(--border); font-size: 0.85rem; color: var(--text-secondary); text-align: left;">
-                <strong style="color: var(--accent-magenta);">👨‍💻 Entwickler Info:</strong><br>
-                Dieser CSV-Importer nutzt standardisierte Spalten. Möchtest du Exporte deines Brokers (Trade Republic, Scalable, IBKR) direkt ohne Umformatierung importieren? 
-                Passe einfach das <code style="color: var(--text-primary); background: var(--bg-primary); padding: 2px 4px; border-radius: 4px;">mapping</code> und die Parsing-Logik in <code style="color: var(--text-primary); background: var(--bg-primary); padding: 2px 4px; border-radius: 4px;">fetchers/csv_reader.py</code> an deine Bedürfnisse an!
+                <strong style="color: var(--accent-magenta);">👨‍💻 <span data-i18n="csvDeveloperInfoTitle">Developer note:</span></strong><br>
+                <span data-i18n="csvDeveloperInfoBody">This CSV importer uses standardized columns. If you want to import broker exports directly, adjust the mapping and parsing logic in fetchers/csv_reader.py to match your format.</span>
             </div>
             <input type="file" id="csvFileInput" accept=".csv" style="display:none;" onchange="handleCsvFile(event)">
         </div>
@@ -832,6 +847,92 @@
         <button class="advisor-submit-btn" id="csvImportBtn" onclick="importCsvPortfolio()" style="display:none;">
             <span data-i18n="uploadCsv">CSV Import</span>
         </button>
+    </div>
+
+    <!-- Holdings Manager Modal -->
+    <div class="slide-panel-overlay" id="holdingsManagerOverlay" onclick="closeHoldingsManager()" style="display:none;"></div>
+    <div class="holdings-manager-modal" id="holdingsManagerModal" style="display:none;">
+        <button class="modal-close" onclick="closeHoldingsManager()">✕</button>
+        <h2 class="section-title" data-i18n="holdingsManagerTitle">Manage Holdings</h2>
+        <p class="advisor-subtitle" data-i18n="holdingsManagerDesc">Add, edit, or remove positions saved in portfolio.csv</p>
+
+        <form class="holding-form" id="holdingForm" onsubmit="saveManagedPosition(event)">
+            <input type="hidden" id="holdingOriginalTicker">
+            <label>
+                <span data-i18n="holdingTicker">Ticker</span>
+                <input id="holdingTicker" name="ticker" placeholder="AAPL" required>
+            </label>
+            <label>
+                <span data-i18n="shares">Shares</span>
+                <input id="holdingShares" name="shares" type="number" step="any" min="0" placeholder="10" required>
+            </label>
+            <label>
+                <span data-i18n="holdingBuyPrice">Buy Price</span>
+                <input id="holdingBuyPrice" name="buy_price" type="number" step="any" min="0" placeholder="150" required>
+            </label>
+            <label>
+                <span data-i18n="holdingCurrentPrice">Current Price</span>
+                <input id="holdingCurrentPrice" name="current_price" type="number" step="any" min="0" placeholder="optional">
+            </label>
+            <label>
+                <span data-i18n="holdingBuyDate">Buy Date</span>
+                <input id="holdingBuyDate" name="buy_date" type="date">
+            </label>
+            <label>
+                <span data-i18n="holdingCurrency">Currency</span>
+                <select id="holdingCurrency" name="currency">
+                    <option value="USD">USD</option>
+                    <option value="CNY">CNY</option>
+                    <option value="GBP">GBP</option>
+                    <option value="CHF">CHF</option>
+                    <option value="CAD">CAD</option>
+                    <option value="JPY">JPY</option>
+                </select>
+            </label>
+            <label>
+                <span data-i18n="holdingAssetType">Asset Type</span>
+                <select id="holdingAssetType" name="asset_type">
+                    <option value="equity" data-i18n="holdingAssetTypeEquity">Equity</option>
+                    <option value="cn_equity" data-i18n="holdingAssetTypeChinaA">China A Share</option>
+                    <option value="prediction_market" data-i18n="holdingAssetTypePrediction">Prediction Market</option>
+                </select>
+            </label>
+            <label>
+                <span data-i18n="holdingMarket">Market</span>
+                <input id="holdingMarket" name="market" placeholder="US / CN-A / Polymarket">
+            </label>
+            <label>
+                <span data-i18n="holdingSector">Sector</span>
+                <input id="holdingSector" name="sector" placeholder="Technology">
+            </label>
+            <label>
+                <span data-i18n="holdingName">Name</span>
+                <input id="holdingName" name="name" placeholder="Apple Inc.">
+            </label>
+            <div class="holding-form-actions">
+                <button type="button" class="secondary-action-btn" onclick="resetHoldingForm()" data-i18n="newHolding">New Holding</button>
+                <button type="submit" class="advisor-submit-btn" id="holdingSaveBtn" data-i18n="saveHolding">Save Holding</button>
+            </div>
+        </form>
+
+        <div class="holdings-manager-table-wrap">
+            <table class="holdings-manager-table">
+                <thead>
+                    <tr>
+                        <th data-i18n="holdingTicker">Ticker</th>
+                        <th data-i18n="shares">Shares</th>
+                        <th data-i18n="holdingTableBuy">Buy</th>
+                        <th data-i18n="holdingTableCurrent">Current</th>
+                        <th data-i18n="holdingCurrency">Currency</th>
+                        <th data-i18n="holdingTableType">Type</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody id="holdingsManagerBody">
+                    <tr><td colspan="7" data-i18n="loading">Loading...</td></tr>
+                </tbody>
+            </table>
+        </div>
     </div>
 
     <!-- Mobile Bottom Navigation -->
@@ -859,7 +960,7 @@
             </button>
             <button class="bottom-nav-item" data-tab="shadow" onclick="switchTab('shadow'); updateBottomNav(this);">
                 <i data-lucide="bot"></i>
-                <span>Shadow</span>
+                <span data-i18n="shadowShort">Shadow</span>
             </button>
         </div>
     </nav>

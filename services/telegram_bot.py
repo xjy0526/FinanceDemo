@@ -17,6 +17,7 @@ import logging
 from typing import Optional
 
 from config import settings
+from services.display_currency import format_display_money
 
 logger = logging.getLogger(__name__)
 
@@ -161,14 +162,14 @@ async def _cmd_portfolio(chat_id: str):
         return
 
     lines = ["💰 *Portfolio Übersicht*\n"]
-    lines.append(f"Gesamtwert: {summary.total_value:,.2f} EUR")
+    lines.append(f"Gesamtwert: {format_display_money(summary.total_value, summary)}")
 
     pnl_emoji = "📈" if summary.total_pnl >= 0 else "📉"
-    lines.append(f"{pnl_emoji} P&L: {summary.total_pnl:+,.2f} EUR ({summary.total_pnl_percent:+.1f}%)")
+    lines.append(f"{pnl_emoji} P&L: {format_display_money(summary.total_pnl, summary, signed=True)} ({summary.total_pnl_percent:+.1f}%)")
 
     if summary.daily_total_change != 0:
         day_emoji = "🟢" if summary.daily_total_change >= 0 else "🔴"
-        lines.append(f"{day_emoji} Heute: {summary.daily_total_change:+,.2f} EUR ({summary.daily_total_change_pct:+.1f}%)")
+        lines.append(f"{day_emoji} Heute: {format_display_money(summary.daily_total_change, summary, signed=True)} ({summary.daily_total_change_pct:+.1f}%)")
 
     if summary.fear_greed:
         fg = summary.fear_greed
@@ -177,7 +178,7 @@ async def _cmd_portfolio(chat_id: str):
     # Cash-Bestand
     cash_stock = next((s for s in summary.stocks if s.position.ticker == "CASH"), None)
     if cash_stock:
-        lines.append(f"💵 Cash: {cash_stock.position.current_price:,.2f} EUR")
+        lines.append(f"💵 Cash: {format_display_money(cash_stock.position.current_price, summary)}")
 
     # FMP Usage
     try:
@@ -303,7 +304,7 @@ async def _cmd_refresh(chat_id: str):
             await send_message(
                 f"✅ Refresh abgeschlossen!\n"
                 f"📊 {summary.num_positions} Positionen geladen\n"
-                f"💰 Portfoliowert: {summary.total_value:,.2f} EUR\n"
+                f"💰 Portfoliowert: {format_display_money(summary.total_value, summary)}\n"
                 f"📡 FMP: {usage['requests_today']}/{usage['daily_limit']} Requests",
                 chat_id=chat_id,
             )
@@ -491,7 +492,7 @@ async def _cmd_attribution(chat_id: str):
     # Gesamt
     pnl_emoji = "📈" if attr["total_pnl_eur"] >= 0 else "📉"
     lines.append(
-        f"{pnl_emoji} Gesamt-P&L: {attr['total_pnl_eur']:+,.2f} EUR "
+        f"{pnl_emoji} Gesamt-P&L: {format_display_money(attr['total_pnl_eur'], summary, signed=True)} "
         f"({attr['total_pnl_pct']:+.1f}%)"
     )
 
@@ -501,7 +502,7 @@ async def _cmd_attribution(chat_id: str):
         for s in attr["sectors"][:5]:
             emoji = "🟢" if s["pnl_eur"] >= 0 else "🔴"
             lines.append(
-                f"  {emoji} {s['sector']}: {s['pnl_eur']:+,.0f} EUR "
+                f"  {emoji} {s['sector']}: {format_display_money(s['pnl_eur'], summary, digits=0, signed=True)} "
                 f"({s['contribution_pct']:+.1f}pp)"
             )
 
@@ -510,7 +511,7 @@ async def _cmd_attribution(chat_id: str):
         lines.append("\n🏆 *Top-Performer:*")
         for p in attr["top_performers"][:3]:
             lines.append(
-                f"  🟢 {p['ticker']}: {p['pnl_eur']:+,.0f} EUR "
+                f"  🟢 {p['ticker']}: {format_display_money(p['pnl_eur'], summary, digits=0, signed=True)} "
                 f"({p['pnl_pct']:+.1f}%)"
             )
 
@@ -518,14 +519,14 @@ async def _cmd_attribution(chat_id: str):
         lines.append("\n📉 *Flop-Performer:*")
         for p in attr["worst_performers"][:3]:
             lines.append(
-                f"  🔴 {p['ticker']}: {p['pnl_eur']:+,.0f} EUR "
+                f"  🔴 {p['ticker']}: {format_display_money(p['pnl_eur'], summary, digits=0, signed=True)} "
                 f"({p['pnl_pct']:+.1f}%)"
             )
 
     # Dividenden
     div = attr["dividends"]
     if div["total_eur"] > 0:
-        lines.append(f"\n💵 Dividenden (gesamt): {div['total_eur']:,.2f} EUR")
+        lines.append(f"\n💵 Dividenden (gesamt): {format_display_money(div['total_eur'], summary)}")
 
     # Konzentration
     conc = attr["concentration"]
@@ -1001,8 +1002,8 @@ async def _process_voice_with_gemini(audio_bytes: bytes, caption: str = "") -> s
             if summary:
                 system_prompt += (
                     f"PORTFOLIO-UEBERSICHT:\n"
-                    f"Gesamtwert: {summary.total_value:,.0f} EUR\n"
-                    f"Gesamt P&L: {summary.total_pnl:+,.0f} EUR ({summary.total_pnl_percent:+.1f}%)\n"
+                    f"Gesamtwert: {format_display_money(summary.total_value, summary, digits=0)}\n"
+                    f"Gesamt P&L: {format_display_money(summary.total_pnl, summary, digits=0, signed=True)} ({summary.total_pnl_percent:+.1f}%)\n"
                     f"Positionen: {summary.num_positions}\n\n"
                 )
         except Exception:

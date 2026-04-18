@@ -1,0 +1,50 @@
+services:
+  - type: web
+    runtime: docker
+    name: portfolio-pilot
+    region: singapore
+    plan: starter
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    autoDeployTrigger: commit
+    healthCheckPath: /health
+    maxShutdownDelaySeconds: 120
+    disk:
+      name: portfolio-pilot-data
+      mountPath: /app/cache
+      sizeGB: 1
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: AI_PROVIDER
+        value: qwen
+      - key: QWEN_BASE_URL
+        value: https://dashscope.aliyuncs.com/compatible-mode/v1
+      - key: QWEN_MODEL
+        value: qwen-plus
+      - key: PARQET_PORTFOLIO_CSV
+        value: /app/cache/portfolio.csv
+      - key: CACHE_TTL_HOURS
+        value: 12
+      - key: QWEN_API_KEY
+        sync: false
+      - key: FMP_API_KEY
+        sync: false
+      - key: DASHBOARD_USER
+        sync: false
+      - key: DASHBOARD_PASSWORD
+        sync: false
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false
+      - key: TELEGRAM_WEBHOOK_SECRET
+        generateValue: true
+      - key: PARQET_CLIENT_ID
+        sync: false
+      - key: PARQET_CLIENT_SECRET
+        sync: false
+      - key: PARQET_REFRESH_TOKEN
+        sync: false
+      - key: PARQET_PORTFOLIO_ID
+        sync: false

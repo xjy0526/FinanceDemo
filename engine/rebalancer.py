@@ -154,7 +154,7 @@ def calculate_rebalancing(
         # R3: Kaufbeträge auf verfügbares Cash begrenzen
         if action_str == "Kaufen" and diff_amount > available_to_invest:
             diff_amount = available_to_invest
-            if diff_amount < 50:  # Unter 50€ → nicht empfehlen
+            if diff_amount < 50:  # Unter Mindestbetrag -> nicht empfehlen
                 action_str = "Halten"
                 diff_amount = 0
 
@@ -222,9 +222,9 @@ def calculate_rebalancing(
 
     summary_parts = []
     if sells:
-        summary_parts.append(f"📉 {len(sells)}× Reduzieren (€{total_sell:,.0f})")
+        summary_parts.append(f"📉 {len(sells)}× Reduzieren")
     if buys:
-        summary_parts.append(f"📈 {len(buys)}× Aufstocken (€{total_buy:,.0f})")
+        summary_parts.append(f"📈 {len(buys)}× Aufstocken")
     if holds:
         summary_parts.append(f"✅ {len(holds)}× Halten")
     if sector_warnings:
@@ -592,7 +592,7 @@ def _build_reasons(
         if analyst.consensus:
             parts.append(analyst.consensus)
         if analyst.target_price and analyst.target_price > 0:
-            parts.append(f"Ziel: €{analyst.target_price:.0f}")
+            parts.append(f"Zielkurs: {analyst.target_price:.0f}")
         if parts:
             reasons.append(f"👨‍💼 Analysten ({analyst.num_analysts}): {', '.join(parts)}")
 

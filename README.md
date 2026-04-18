@@ -52,7 +52,14 @@ python main.py
 http://localhost:8000
 ```
 
-如果你已经创建好虚拟环境，Windows 也可以直接运行 [start.bat](/Users/xjy/Documents/GitHub/FinanceBro/start.bat)。
+macOS 也可以直接运行 [start.sh](start.sh)：
+
+```bash
+chmod +x start.sh
+./start.sh
+```
+
+如果你已经创建好虚拟环境，Windows 也可以直接运行 [start.bat](start.bat)。
 
 ## 千问配置
 
@@ -77,6 +84,38 @@ APP_TAGLINE=面向全球股票、中国A股与Polymarket的AI投资组合助手
 
 - 未配置完整 API Key 时，项目仍可在演示模式下运行
 - AI 分析、交易建议、部分自动化能力依赖千问接口配置
+
+## Render 公网部署
+
+项目已内置 [render.yaml](render.yaml)，适合通过 Render Blueprint 直接部署为公网 Web Service。
+
+推荐配置：
+
+- Runtime：Docker
+- Region：Singapore
+- Plan：Starter 或更高
+- Persistent Disk：挂载到 `/app/cache`
+- Portfolio CSV：`/app/cache/portfolio.csv`
+
+部署步骤：
+
+1. 将代码推送到 GitHub 仓库。
+2. 打开 Render Dashboard，选择 `New` → `Blueprint`。
+3. 连接这个 GitHub 仓库，Render 会自动读取 `render.yaml`。
+4. 按提示填写 `sync: false` 的环境变量，至少建议设置：
+   - `QWEN_API_KEY`
+   - `FMP_API_KEY`
+   - `DASHBOARD_USER`
+   - `DASHBOARD_PASSWORD`
+5. 创建服务后等待 Docker 构建完成。
+6. 部署完成后访问 Render 提供的 `https://你的服务名.onrender.com`。
+
+重要说明：
+
+- `DASHBOARD_USER` 和 `DASHBOARD_PASSWORD` 强烈建议填写，否则公网地址会直接开放。
+- Render 的普通文件系统是临时的，只有 `/app/cache` 下的数据会被 Persistent Disk 保留。
+- 项目已将 `PARQET_PORTFOLIO_CSV` 指向 `/app/cache/portfolio.csv`，上传的 CSV 持仓会跟 SQLite 数据库一起保存在持久化磁盘里。
+- 如果后续绑定自定义域名，可以在 Render 服务的 `Settings` → `Custom Domains` 中添加域名，再到 DNS 服务商处配置 CNAME。
 
 ## 支持的持仓类型
 
@@ -118,6 +157,8 @@ POLY-BTC-150K-2026,80,0.31,0.36,2026-01-05,USD,Prediction Markets,BTC above 150k
 - `market`：市场标识
 - `exchange`：交易所
 - `country`：国家或来源标识
+
+在 Dashboard 里通过 `CSV Import` 上传后，系统会把标准化后的持仓保存到项目目录下的 `portfolio.csv`（可通过 `.env` 里的 `PARQET_PORTFOLIO_CSV` 修改路径）。之后重启服务或执行刷新时，会优先读取这份本地 CSV，所以真实持仓可以长期保存在本地。`portfolio.csv` 已加入 `.gitignore`，避免误提交真实持仓。
 
 ## 后续可扩展方向
 

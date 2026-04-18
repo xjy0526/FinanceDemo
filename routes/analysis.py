@@ -293,13 +293,16 @@ async def evaluate_trade_endpoint(data: dict):
         extra_context: str (optional) — Externe Quellen / Analystenkommentare
     """
     ticker = data.get("ticker", "").strip().upper()
+    lang = data.get("lang", "zh")
     if not ticker:
-        return {"error": "Bitte einen Ticker angeben (z.B. NVDA, AAPL)"}
+        return {
+            "error": "请输入一个代码（例如 NVDA、AAPL）"
+            if lang == "zh" else "Please enter a ticker (e.g. NVDA, AAPL)"
+        }
 
     action = data.get("action", "buy")
     amount_eur = data.get("amount_eur")
     extra_context = data.get("extra_context")
-    lang = data.get("lang", "de")
 
     if amount_eur:
         try:
@@ -327,11 +330,14 @@ async def advisor_chat_endpoint(data: dict):
         history: list (optional) — Bisheriger Chat-Verlauf
     """
     message = data.get("message", "").strip()
+    lang = data.get("lang", "zh")
     if not message:
-        return {"error": "Bitte eine Nachricht eingeben."}
+        return {
+            "error": "请输入一条消息。"
+            if lang == "zh" else "Please enter a message."
+        }
 
     history = data.get("history", [])
-    lang = data.get("lang", "de")
 
     from services.trade_advisor import chat_with_advisor
     result = await chat_with_advisor(
@@ -341,3 +347,13 @@ async def advisor_chat_endpoint(data: dict):
     )
     return result
 
+
+@router.get("/api/advisor/holding-recommendations")
+async def holding_recommendations_endpoint(lang: str = "zh"):
+    """AI Holding Advisor: Gibt Empfehlungen fuer alle aktuellen Positionen."""
+    if lang not in ("zh", "en"):
+        lang = "zh"
+
+    from services.holding_recommendations import generate_holding_recommendations
+
+    return await generate_holding_recommendations(lang=lang)

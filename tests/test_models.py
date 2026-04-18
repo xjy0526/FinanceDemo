@@ -133,13 +133,14 @@ class TestPortfolioSummary:
         s = PortfolioSummary()
         assert s.total_value == 0.0
         assert s.is_demo is False
-        assert s.display_currency == "EUR"
+        assert s.display_currency == "USD"
         assert s.eur_usd_rate == 1.0
 
     def test_currency_fields(self):
-        s = PortfolioSummary(eur_usd_rate=1.08, display_currency="EUR")
+        s = PortfolioSummary(eur_usd_rate=1.08, eur_cny_rate=7.8, display_currency="CNY")
         assert s.eur_usd_rate == 1.08
-        assert s.display_currency == "EUR"
+        assert s.eur_cny_rate == 7.8
+        assert s.display_currency == "CNY"
 
 
 class TestDataSourceStatus:
